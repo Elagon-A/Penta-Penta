@@ -16,6 +16,7 @@ internal sealed class MainWindow : Window
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private string filter = "";
+    private bool armSingleMeld;
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, MateriaDiagnostics diagnostics)
         : base("PentaPenta###PentaPentaMain", ImGuiWindowFlags.NoScrollbar)
@@ -65,6 +66,16 @@ internal sealed class MainWindow : Window
         if (ImGui.Button("Capture Materia window map")) diagnostics.Capture();
         ImGui.SameLine(); ImGui.TextWrapped(diagnostics.LastResult);
         if (ImGui.Button("Validate open choice (no meld)")) controller.ValidateOpenDetail();
+        ImGui.Separator();
+        ImGui.Checkbox("Arm one guaranteed meld", ref armSingleMeld);
+        var wasArmed = armSingleMeld;
+        if (!wasArmed) ImGui.BeginDisabled();
+        if (ImGui.Button("Meld one verified materia"))
+        {
+            controller.ExecuteOneVerifiedGuaranteedMeld();
+            armSingleMeld = false;
+        }
+        if (!wasArmed) ImGui.EndDisabled();
     }
 
     private void Refresh() { gear = scanner.Scan(); selected.Clear(); foreach (var q in config.Queue) selected.Add($"{q.Container}:{q.Slot}:{q.ItemId}:{q.Hq}"); }

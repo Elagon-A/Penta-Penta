@@ -73,5 +73,31 @@ internal sealed class MeldController(Services services, Configuration config)
         Status = $"SAFE PREVIEW: slot {slot}, {materiaName}, {gainText}, item verified. No callback sent.";
     }
 
+    public unsafe void ExecuteOneVerifiedGuaranteedMeld()
+    {
+        ValidateOpenDetail();
+        if (State != RunState.Ready || items.Count == 0) return;
+
+        var slot = items[0].MeldCount + 1;
+        if (slot > 2)
+        { Fail("One-shot test is restricted to guaranteed slots 1–2."); return; }
+
+        var addon = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttachDialog");
+        if (addon == null || !addon->IsReady)
+        { Fail("Materia detail closed before execution."); return; }
+
+        var args = stackalloc AtkValue[3];
+        for (var i = 0; i < 3; i++)
+        {
+            args[i].Type = AtkValueType.Int;
+            args[i].Int = 0;
+        }
+
+        State = RunState.Running;
+        Status = $"One verified slot-{slot} meld callback sent. Inspect the item before continuing.";
+        services.Log.Information("Sending one verified guaranteed meld callback for {Item}, slot {Slot}", items[0].Name, slot);
+        addon->FireCallback(3, args, true);
+    }
+
     private void Fail(string message) { State = RunState.Error; Status = message; services.Log.Warning(message); }
 }
