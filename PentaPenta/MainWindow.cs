@@ -64,6 +64,7 @@ internal sealed class MainWindow : Window
         ImGui.TextDisabled("Read-only validation (does not click or meld):");
         if (ImGui.Button("Capture Materia window map")) diagnostics.Capture();
         ImGui.SameLine(); ImGui.TextWrapped(diagnostics.LastResult);
+        if (ImGui.Button("Validate open choice (no meld)")) controller.ValidateOpenDetail();
     }
 
     private void Refresh() { gear = scanner.Scan(); selected.Clear(); foreach (var q in config.Queue) selected.Add($"{q.Container}:{q.Slot}:{q.ItemId}:{q.Hq}"); }

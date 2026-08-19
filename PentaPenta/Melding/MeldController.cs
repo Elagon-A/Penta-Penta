@@ -1,4 +1,6 @@
 using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Utility;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 using PentaPenta.Models;
 
 namespace PentaPenta.Melding;
@@ -36,5 +38,40 @@ internal sealed class MeldController(Services services, Configuration config)
     }
 
     public void Stop() { State = RunState.Idle; Status = "Stopped by user."; }
+
+    public unsafe void ValidateOpenDetail()
+    {
+        if (items.Count == 0) { Fail("Prepare the queue first."); return; }
+        var addon = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttachDialog");
+        if (addon == null || !addon->IsReady || addon->AtkValuesCount <= 16)
+        { Fail("Open a materia detail window first."); return; }
+
+        var materiaName = addon->AtkValues[9].String.ExtractText().Trim();
+        var gainText = addon->AtkValues[10].String.ExtractText().Trim();
+        var equipmentName = addon->AtkValues[16].String.ExtractText().Trim();
+        var expectedItem = items[0];
+        if (!equipmentName.StartsWith(expectedItem.Name, StringComparison.Ordinal))
+        { Fail($"Selected item mismatch: expected {expectedItem.Name}, found {equipmentName}."); return; }
+
+        var slot = expectedItem.MeldCount + 1;
+        var expectedGrade = MeldPlan.GradeForSlot(slot);
+        var choice = MeldPlan.Priority.FirstOrDefault(x => materiaName.Contains(x.Stat switch
+        {
+            MeldStat.CriticalHit => "Savage Aim",
+            MeldStat.DirectHit => "Heavens' Eye",
+            _ => "Savage Might"
+        }, StringComparison.Ordinal));
+        if (choice is null) { Fail($"Unsupported materia: {materiaName}."); return; }
+
+        var expectedGain = expectedGrade == 12 ? choice.Grade12Gain : choice.Grade11Gain;
+        if (!materiaName.EndsWith(expectedGrade == 12 ? "XII" : "XI", StringComparison.Ordinal))
+        { Fail($"Slot {slot} requires grade {expectedGrade}."); return; }
+        if (!gainText.Contains($"+{expectedGain}", StringComparison.Ordinal))
+        { Fail($"Strict no-overcap rejected {materiaName}: displayed {gainText}, expected +{expectedGain}."); return; }
+
+        State = RunState.Ready;
+        Status = $"SAFE PREVIEW: slot {slot}, {materiaName}, {gainText}, item verified. No callback sent.";
+    }
+
     private void Fail(string message) { State = RunState.Error; Status = message; services.Log.Warning(message); }
 }
