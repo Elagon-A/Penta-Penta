@@ -48,7 +48,7 @@ internal sealed class MeldController : IDisposable
         if (items.Count != 1) { Fail("This guarded build requires exactly one queued item."); return; }
         if (!services.ClientState.IsLoggedIn) { Fail("You are not logged in."); return; }
         if (services.Condition[ConditionFlag.InCombat]) { Fail("Cannot start in combat."); return; }
-        if (items[0].MeldCount != 0) { Fail("Full-run test requires an untouched 0/5 item."); return; }
+        if (items[0].MeldCount >= 5) { Fail("Selected item is already fully melded."); return; }
         if (!items[0].AdvancedMeldingPermitted) { Fail("Selected item cannot be overmelded."); return; }
         if (services.GameGui.GetAddonByName("MateriaAttach").IsNull)
         { State = RunState.WaitingForMeldingWindow; Status = "Open the Materia Melding window."; return; }
@@ -59,7 +59,7 @@ internal sealed class MeldController : IDisposable
         autoNextAction = DateTime.UtcNow;
         autoDeadline = DateTime.UtcNow.AddSeconds(15);
         State = RunState.Running;
-        Status = $"Starting guarded five-slot run for {items[0].Name}...";
+        Status = $"Starting guarded run at slot {items[0].MeldCount + 1} for {items[0].Name}...";
     }
 
     public void Stop() { autoPhase = AutoPhase.None; advancedPhase = AdvancedPhase.None; State = RunState.Idle; Status = "Stopped by user."; }
