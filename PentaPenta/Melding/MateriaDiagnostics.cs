@@ -1,4 +1,5 @@
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using Dalamud.Utility;
 
 namespace PentaPenta.Melding;
 
@@ -23,18 +24,19 @@ internal sealed class MateriaDiagnostics(Services services)
             for (var i = 0; i < count; i++)
             {
                 ref var value = ref values[i];
-                var rendered = (int)value.Type switch
+                var typeName = value.Type.ToString();
+                var rendered = typeName switch
                 {
-                    2 => (value.Byte != 0).ToString(),
-                    3 => value.Int.ToString(),
-                    4 => value.UInt.ToString(),
-                    5 => value.Float.ToString("0.###"),
-                    6 or 7 => value.String.ToString(),
+                    "Bool" => (value.Byte != 0).ToString(),
+                    "Int" => value.Int.ToString(),
+                    "UInt" => value.UInt.ToString(),
+                    "Float" => value.Float.ToString("0.###"),
+                    "String" or "String8" => value.String.ExtractText(),
                     _ => ""
                 };
 
-                if (!string.IsNullOrWhiteSpace(rendered))
-                    lines.Add($"[{i}] {value.Type}: {rendered}");
+                if ((int)value.Type != 0)
+                    lines.Add($"[{i}] {typeName} ({(int)value.Type}): {rendered}");
             }
 
             LastResult = $"Captured {lines.Count} populated values. See dalamud.log.";
