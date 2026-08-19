@@ -1,0 +1,71 @@
+using System.Numerics;
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Windowing;
+using PentaPenta.Melding;
+using PentaPenta.Models;
+
+namespace PentaPenta;
+
+internal sealed class MainWindow : Window
+{
+    private readonly Services services;
+    private readonly Configuration config;
+    private readonly InventoryScanner scanner;
+    private readonly MeldController controller;
+    private List<InventoryGear> gear = [];
+    private readonly HashSet<string> selected = [];
+    private string filter = "";
+
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller)
+        : base("PentaPenta###PentaPentaMain", ImGuiWindowFlags.NoScrollbar)
+    {
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller;
+        SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 460), MaximumSize = new Vector2(float.MaxValue) };
+        Refresh();
+    }
+
+    public override void Draw()
+    {
+        ImGui.TextWrapped("Select inventory gear, arrange your queue, then open Materia Melding. Each item is tracked by bag and slot so duplicate rings remain distinct.");
+        ImGui.Separator();
+        if (ImGui.Button("Refresh inventory")) Refresh();
+        ImGui.SameLine(); ImGui.SetNextItemWidth(260); ImGui.InputTextWithHint("##filter", "Filter gear...", ref filter, 100);
+        ImGui.SameLine(); ImGui.TextDisabled($"{selected.Count} selected");
+
+        if (ImGui.BeginTable("gear", 5, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY, new Vector2(0, 260)))
+        {
+            ImGui.TableSetupColumn("Queue", ImGuiTableColumnFlags.WidthFixed, 55);
+            ImGui.TableSetupColumn("Item"); ImGui.TableSetupColumn("Location");
+            ImGui.TableSetupColumn("Melds", ImGuiTableColumnFlags.WidthFixed, 60);
+            ImGui.TableSetupColumn("Overmeld", ImGuiTableColumnFlags.WidthFixed, 75); ImGui.TableHeadersRow();
+            foreach (var item in gear.Where(x => filter.Length == 0 || x.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)))
+            {
+                var key = Key(item); var check = selected.Contains(key);
+                ImGui.PushID(key); ImGui.TableNextRow(); ImGui.TableNextColumn();
+                if (ImGui.Checkbox("##select", ref check)) { if (check) selected.Add(key); else selected.Remove(key); SaveQueue(); }
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(item.Name + (item.Hq ? " ★" : ""));
+                ImGui.TableNextColumn(); ImGui.TextUnformatted($"Bag {(int)item.Container} / slot {item.Slot + 1}");
+                ImGui.TableNextColumn(); ImGui.TextUnformatted($"{item.MeldCount}/5");
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(item.AdvancedMeldingPermitted ? "Yes" : "No"); ImGui.PopID();
+            }
+            ImGui.EndTable();
+        }
+
+        ImGui.Text("Plan: Critical Hit  >  Direct Hit  >  Determination");
+        ImGui.TextDisabled("Slots 1–3: grade XII   |   Slots 4–5: grade XI   |   strict no-overcap");
+        ImGui.Separator(); ImGui.TextWrapped($"Status: {controller.Status}");
+        if (ImGui.Button("Prepare queue")) controller.Load(gear.Where(x => selected.Contains(Key(x))));
+        ImGui.SameLine();
+        if (ImGui.Button("Start")) controller.Start();
+        ImGui.SameLine();
+        if (ImGui.Button("Stop")) controller.Stop();
+    }
+
+    private void Refresh() { gear = scanner.Scan(); selected.Clear(); foreach (var q in config.Queue) selected.Add($"{q.Container}:{q.Slot}:{q.ItemId}:{q.Hq}"); }
+    private void SaveQueue()
+    {
+        config.Queue = gear.Where(x => selected.Contains(Key(x))).Select(x => new QueuedItem(x.ItemId, x.Name, (int)x.Container, x.Slot, x.Hq)).ToList();
+        services.PluginInterface.SavePluginConfig(config);
+    }
+    private static string Key(InventoryGear x) => $"{(int)x.Container}:{x.Slot}:{x.ItemId}:{x.Hq}";
+}

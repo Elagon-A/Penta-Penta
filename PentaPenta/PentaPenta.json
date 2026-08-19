@@ -1,0 +1,8 @@
+{
+  "Author": "Luis",
+  "Name": "PentaPenta",
+  "Punchline": "Select inventory gear and safely queue pentamelds.",
+  "Description": "Inventory picker and guarded pentameld queue. Defaults to Critical Hit > Direct Hit > Determination, strict no-overcap.",
+  "ApplicableVersion": "any",
+  "Tags": [ "crafting", "materia", "inventory" ]
+}

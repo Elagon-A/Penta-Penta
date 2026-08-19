@@ -1,0 +1,19 @@
+[
+  {
+    "Author": "Luis",
+    "Name": "PentaPenta",
+    "InternalName": "PentaPenta",
+    "AssemblyVersion": "0.1.0.0",
+    "TestingAssemblyVersion": "0.1.0.0",
+    "Punchline": "Select inventory gear and safely queue pentamelds.",
+    "Description": "Inventory picker and guarded pentameld queue. Defaults to Critical Hit > Direct Hit > Determination with strict no-overcap behavior.",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 14,
+    "TestingDalamudApiLevel": 14,
+    "IsHide": false,
+    "IsTestingExclusive": false,
+    "DownloadLinkInstall": "https://raw.githubusercontent.com/Elagon-A/Penta_Penta/main/dist/latest.zip",
+    "DownloadLinkTesting": "https://raw.githubusercontent.com/Elagon-A/Penta_Penta/main/dist/latest.zip",
+    "DownloadLinkUpdate": "https://raw.githubusercontent.com/Elagon-A/Penta_Penta/main/dist/latest.zip"
+  }
+]
