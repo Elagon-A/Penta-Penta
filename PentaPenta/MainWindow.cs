@@ -17,6 +17,7 @@ internal sealed class MainWindow : Window
     private readonly HashSet<string> selected = [];
     private string filter = "";
     private bool armSingleMeld;
+    private bool armAdvancedMeld;
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, MateriaDiagnostics diagnostics)
         : base("PentaPenta###PentaPentaMain", ImGuiWindowFlags.NoScrollbar)
@@ -76,6 +77,15 @@ internal sealed class MainWindow : Window
             armSingleMeld = false;
         }
         if (!wasArmed) ImGui.EndDisabled();
+        ImGui.Checkbox("Arm one bulk advanced meld", ref armAdvancedMeld);
+        var advancedWasArmed = armAdvancedMeld;
+        if (!advancedWasArmed) ImGui.BeginDisabled();
+        if (ImGui.Button("Run one verified advanced meld"))
+        {
+            controller.ExecuteOneVerifiedAdvancedMeld();
+            armAdvancedMeld = false;
+        }
+        if (!advancedWasArmed) ImGui.EndDisabled();
     }
 
     private void Refresh() { gear = scanner.Scan(); selected.Clear(); foreach (var q in config.Queue) selected.Add($"{q.Container}:{q.Slot}:{q.ItemId}:{q.Hq}"); }

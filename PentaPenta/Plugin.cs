@@ -10,6 +10,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Services services;
     private readonly WindowSystem windows = new("PentaPenta");
     private readonly MainWindow main;
+    private readonly Melding.MeldController controller;
 
     public Plugin(
         IDalamudPluginInterface pi,
@@ -25,7 +26,7 @@ public sealed class Plugin : IDalamudPlugin
         services = new Services(pi, commands, framework, inventory, data, gameGui, clientState, condition, log);
         var config = pi.GetPluginConfig() as Configuration ?? new Configuration();
         var scanner = new InventoryScanner(services);
-        var controller = new Melding.MeldController(services, config);
+        controller = new Melding.MeldController(services, config);
         var diagnostics = new Melding.MateriaDiagnostics(services);
         main = new MainWindow(services, config, scanner, controller, diagnostics);
         windows.AddWindow(main);
@@ -41,5 +42,6 @@ public sealed class Plugin : IDalamudPlugin
         services.PluginInterface.UiBuilder.Draw -= windows.Draw;
         services.PluginInterface.UiBuilder.OpenMainUi -= main.Toggle;
         windows.RemoveAllWindows();
+        controller.Dispose();
     }
 }

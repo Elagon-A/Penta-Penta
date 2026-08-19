@@ -1,4 +1,5 @@
 using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Plugin.Services;
 using Dalamud.Utility;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using PentaPenta.Models;
@@ -7,12 +8,26 @@ namespace PentaPenta.Melding;
 
 internal enum RunState { Idle, WaitingForMeldingWindow, Ready, Running, Paused, Complete, Error }
 
-internal sealed class MeldController(Services services, Configuration config)
+internal sealed class MeldController : IDisposable
 {
+    private readonly Services services;
+    private readonly Configuration config;
     public RunState State { get; private set; } = RunState.Idle;
     public string Status { get; private set; } = "Idle";
     public IReadOnlyList<InventoryGear> Items => items;
     private readonly List<InventoryGear> items = [];
+    private AdvancedPhase advancedPhase;
+    private DateTime advancedDeadline;
+    private uint pendingMateriaId;
+    private int startingMateriaCount;
+    private int startingMeldCount;
+
+    public MeldController(Services services, Configuration config)
+    {
+        this.services = services;
+        this.config = config;
+        services.Framework.Update += OnFrameworkUpdate;
+    }
 
     public void Load(IEnumerable<InventoryGear> selected)
     {
@@ -99,5 +114,104 @@ internal sealed class MeldController(Services services, Configuration config)
         addon->FireCallback(3, args, true);
     }
 
+    public unsafe void ExecuteOneVerifiedAdvancedMeld()
+    {
+        ValidateOpenDetail();
+        if (State != RunState.Ready || items.Count == 0) return;
+
+        var slot = items[0].MeldCount + 1;
+        if (slot < 3 || slot > 5)
+        { Fail("Advanced test is restricted to overmeld slots 3–5."); return; }
+
+        var addon = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttachDialog");
+        if (addon == null || !addon->IsReady)
+        { Fail("Materia detail closed before execution."); return; }
+
+        var materiaName = addon->AtkValues[9].String.ExtractText().Trim();
+        pendingMateriaId = MateriaItemId(materiaName);
+        if (pendingMateriaId == 0) { Fail($"Unsupported materia: {materiaName}."); return; }
+
+        startingMateriaCount = CountItem(pendingMateriaId);
+        startingMeldCount = items[0].MeldCount;
+        if (startingMateriaCount <= 0) { Fail("No matching materia remains."); return; }
+
+        var args = stackalloc AtkValue[3];
+        args[0].Type = AtkValueType.Int; args[0].Int = 0;
+        args[1].Type = AtkValueType.Int; args[1].Int = 0;
+        args[2].Type = AtkValueType.Int; args[2].Int = 1;
+        advancedPhase = AdvancedPhase.WaitingForConfirmation;
+        advancedDeadline = DateTime.UtcNow.AddSeconds(10);
+        State = RunState.Running;
+        Status = $"Opening guarded bulk advanced meld for slot {slot}...";
+        addon->FireCallback(3, args, true);
+    }
+
+    private unsafe void OnFrameworkUpdate(IFramework _)
+    {
+        if (advancedPhase == AdvancedPhase.None) return;
+        if (DateTime.UtcNow > advancedDeadline)
+        { advancedPhase = AdvancedPhase.None; Fail("Advanced meld timed out; inspect the item."); return; }
+
+        if (advancedPhase == AdvancedPhase.WaitingForConfirmation)
+        {
+            var yesno = services.GameGui.GetAddonByName<AtkUnitBase>("SelectYesno");
+            if (yesno == null || !yesno->IsReady) return;
+
+            var args = stackalloc AtkValue[1];
+            args[0].Type = AtkValueType.Int; args[0].Int = 0;
+            services.Log.Information("Confirming one guarded bulk advanced meld");
+            yesno->FireCallback(1, args, true);
+            advancedPhase = AdvancedPhase.Monitoring;
+            advancedDeadline = DateTime.UtcNow.AddMinutes(6);
+            Status = "Bulk advanced meld running; monitoring quantity and item state...";
+            return;
+        }
+
+        var currentCount = CountItem(pendingMateriaId);
+        var currentMelds = CurrentMeldCount(items[0]);
+        if (currentMelds > startingMeldCount)
+        {
+            var used = Math.Max(0, startingMateriaCount - currentCount);
+            advancedPhase = AdvancedPhase.None;
+            State = RunState.Complete;
+            Status = $"Advanced meld succeeded; {used} materia consumed. Refresh before continuing.";
+        }
+        else if (currentCount <= 0)
+        {
+            advancedPhase = AdvancedPhase.None;
+            Fail("Materia reached zero before success; inspect the item.");
+        }
+    }
+
+    private int CountItem(uint itemId)
+    {
+        var total = 0;
+        foreach (var type in new[] { Dalamud.Game.Inventory.GameInventoryType.Inventory1, Dalamud.Game.Inventory.GameInventoryType.Inventory2, Dalamud.Game.Inventory.GameInventoryType.Inventory3, Dalamud.Game.Inventory.GameInventoryType.Inventory4 })
+            foreach (ref readonly var item in services.Inventory.GetInventoryItems(type))
+                if (!item.IsEmpty && item.BaseItemId == itemId) total += item.Quantity;
+        return total;
+    }
+
+    private int CurrentMeldCount(InventoryGear expected)
+    {
+        var slots = services.Inventory.GetInventoryItems(expected.Container);
+        if (expected.Slot >= slots.Length) return -1;
+        var item = slots[(int)expected.Slot];
+        if (item.IsEmpty || item.BaseItemId != expected.ItemId || item.IsHq != expected.Hq) return -1;
+        return item.MateriaEntries.Count(x => x.Type.RowId != 0);
+    }
+
+    private static uint MateriaItemId(string name) => name switch
+    {
+        "Savage Aim Materia XI" => 41759, "Savage Aim Materia XII" => 41772,
+        "Savage Might Materia XI" => 41760, "Savage Might Materia XII" => 41773,
+        "Heavens' Eye Materia XI" => 41758, "Heavens' Eye Materia XII" => 41771,
+        _ => 0
+    };
+
+    public void Dispose() => services.Framework.Update -= OnFrameworkUpdate;
+
     private void Fail(string message) { State = RunState.Error; Status = message; services.Log.Warning(message); }
+
+    private enum AdvancedPhase { None, WaitingForConfirmation, Monitoring }
 }
