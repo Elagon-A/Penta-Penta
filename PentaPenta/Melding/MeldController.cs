@@ -26,6 +26,7 @@ internal sealed class MeldController : IDisposable
     private DateTime autoDeadline;
     private int autoCandidateIndex;
     private string autoMateriaName = "";
+    private int autoRetries;
 
     public MeldController(Services services, Configuration config)
     {
@@ -53,6 +54,7 @@ internal sealed class MeldController : IDisposable
         { State = RunState.WaitingForMeldingWindow; Status = "Open the Materia Melding window."; return; }
 
         autoCandidateIndex = 0;
+        autoRetries = 0;
         autoPhase = AutoPhase.SelectEquipment;
         autoNextAction = DateTime.UtcNow;
         autoDeadline = DateTime.UtcNow.AddSeconds(15);
@@ -201,7 +203,20 @@ internal sealed class MeldController : IDisposable
     {
         if (DateTime.UtcNow < autoNextAction) return;
         if (DateTime.UtcNow > autoDeadline)
-        { StopAutomaticWithError("Automatic run timed out; inspect the item before continuing."); return; }
+        {
+            if (autoPhase == AutoPhase.WaitDetail && autoRetries < 2)
+            {
+                autoRetries++;
+                services.Log.Warning("Materia detail did not open; retry {Retry}/2 after equipment reselection", autoRetries);
+                autoPhase = AutoPhase.SelectEquipment;
+                autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
+                autoDeadline = DateTime.UtcNow.AddSeconds(20);
+                Status = $"Materia UI cooldown retry {autoRetries}/2...";
+                return;
+            }
+            StopAutomaticWithError($"Automatic run timed out in phase {autoPhase}; inspect the item before continuing.");
+            return;
+        }
 
         var expected = items[0];
         var currentMelds = CurrentMeldCount(expected);
@@ -226,6 +241,7 @@ internal sealed class MeldController : IDisposable
                 if (rows.Count != 1)
                 { StopAutomaticWithError(rows.Count == 0 ? "Expected equipment is not visible in Materia Melding." : "Duplicate visible equipment names are unsafe in this build."); return; }
                 FireInts(main, 1, rows[0] - 147, 1, 0);
+                services.Log.Information("Auto phase SelectEquipment: row {Row}, item {Item}", rows[0] - 147, expected.Name);
                 autoPhase = AutoPhase.ChooseCandidate;
                 autoCandidateIndex = 0;
                 autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
@@ -250,6 +266,7 @@ internal sealed class MeldController : IDisposable
                 var rows = FindStringRows(main, 429, autoMateriaName);
                 if (rows.Count != 1) { autoCandidateIndex++; return; }
                 FireInts(main, 2, rows[0] - 429, 1, 0);
+                services.Log.Information("Auto phase ChooseCandidate: row {Row}, materia {Materia}", rows[0] - 429, autoMateriaName);
                 autoPhase = AutoPhase.WaitDetail;
                 autoNextAction = DateTime.UtcNow.AddMilliseconds(200);
                 autoDeadline = DateTime.UtcNow.AddSeconds(8);
@@ -280,6 +297,7 @@ internal sealed class MeldController : IDisposable
                 }
 
                 startingMeldCount = currentMelds;
+                autoRetries = 0;
                 startingMateriaCount = CountItem(pendingMateriaId);
                 if (currentMelds < 2)
                 {
