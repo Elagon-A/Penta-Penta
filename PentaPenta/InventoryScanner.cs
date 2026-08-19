@@ -15,6 +15,9 @@ internal sealed class InventoryScanner(Services services)
     public List<InventoryGear> Scan()
     {
         var result = new List<InventoryGear>();
+        if (!services.ClientState.IsLoggedIn)
+            return result;
+
         foreach (var bag in Bags)
         foreach (ref readonly var slot in services.Inventory.GetInventoryItems(bag))
         {

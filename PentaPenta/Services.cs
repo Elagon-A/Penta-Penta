@@ -1,18 +1,26 @@
-using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 
 namespace PentaPenta;
 
-internal sealed class Services
+internal sealed class Services(
+    IDalamudPluginInterface pluginInterface,
+    ICommandManager commands,
+    IFramework framework,
+    IGameInventory inventory,
+    IDataManager data,
+    IGameGui gameGui,
+    IClientState clientState,
+    ICondition condition,
+    IPluginLog log)
 {
-    [PluginService] internal IDalamudPluginInterface PluginInterface { get; init; } = null!;
-    [PluginService] internal ICommandManager Commands { get; init; } = null!;
-    [PluginService] internal IFramework Framework { get; init; } = null!;
-    [PluginService] internal IGameInventory Inventory { get; init; } = null!;
-    [PluginService] internal IDataManager Data { get; init; } = null!;
-    [PluginService] internal IGameGui GameGui { get; init; } = null!;
-    [PluginService] internal IClientState ClientState { get; init; } = null!;
-    [PluginService] internal ICondition Condition { get; init; } = null!;
-    [PluginService] internal IPluginLog Log { get; init; } = null!;
+    internal IDalamudPluginInterface PluginInterface { get; } = pluginInterface;
+    internal ICommandManager Commands { get; } = commands;
+    internal IFramework Framework { get; } = framework;
+    internal IGameInventory Inventory { get; } = inventory;
+    internal IDataManager Data { get; } = data;
+    internal IGameGui GameGui { get; } = gameGui;
+    internal IClientState ClientState { get; } = clientState;
+    internal ICondition Condition { get; } = condition;
+    internal IPluginLog Log { get; } = log;
 }
