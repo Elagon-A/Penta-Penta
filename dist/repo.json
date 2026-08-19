@@ -12,8 +12,8 @@
     "TestingDalamudApiLevel": 15,
     "IsHide": false,
     "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://raw.githubusercontent.com/Elagon-A/Penta-Penta/main/dist/latest.zip?v=0.1.10",
-    "DownloadLinkTesting": "https://raw.githubusercontent.com/Elagon-A/Penta-Penta/main/dist/latest.zip?v=0.1.10",
-    "DownloadLinkUpdate": "https://raw.githubusercontent.com/Elagon-A/Penta-Penta/main/dist/latest.zip?v=0.1.10"
+    "DownloadLinkInstall": "https://raw.githubusercontent.com/Elagon-A/Penta-Penta/main/dist/latest.zip?v=0.1.10b",
+    "DownloadLinkTesting": "https://raw.githubusercontent.com/Elagon-A/Penta-Penta/main/dist/latest.zip?v=0.1.10b",
+    "DownloadLinkUpdate": "https://raw.githubusercontent.com/Elagon-A/Penta-Penta/main/dist/latest.zip?v=0.1.10b"
   }
 ]
