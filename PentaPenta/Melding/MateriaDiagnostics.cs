@@ -11,13 +11,32 @@ internal sealed class MateriaDiagnostics(Services services)
     {
         try
         {
-            var addon = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttach");
-            if (addon == null || !addon->IsReady)
+            var captured = new List<string>();
+            if (CaptureAddon("MateriaAttach")) captured.Add("MateriaAttach");
+            if (CaptureAddon("MateriaAttachDialog")) captured.Add("MateriaAttachDialog");
+
+            if (captured.Count == 0)
             {
-                LastResult = "Open Materia Melding and select an item first.";
+                LastResult = "No ready Materia window found.";
                 return;
             }
 
+            LastResult = $"Captured {string.Join(" + ", captured)}. See dalamud.log.";
+        }
+        catch (Exception ex)
+        {
+            LastResult = "Capture failed; see dalamud.log.";
+            services.Log.Error(ex, "PentaPenta Materia diagnostic failed");
+        }
+    }
+
+    private unsafe bool CaptureAddon(string addonName)
+    {
+        var addon = services.GameGui.GetAddonByName<AtkUnitBase>(addonName);
+        if (addon == null || !addon->IsReady) return false;
+
+        try
+        {
             var lines = new List<string>();
             var values = addon->AtkValues;
             var count = addon->AtkValuesCount;
@@ -39,13 +58,13 @@ internal sealed class MateriaDiagnostics(Services services)
                     lines.Add($"[{i}] {typeName} ({(int)value.Type}): {rendered}");
             }
 
-            LastResult = $"Captured {lines.Count} populated values. See dalamud.log.";
-            services.Log.Information("PentaPenta MateriaAttach diagnostic ({Count} values):\n{Values}", count, string.Join("\n", lines));
+            services.Log.Information("PentaPenta {Addon} diagnostic ({Count} values):\n{Values}", addonName, count, string.Join("\n", lines));
+            return true;
         }
         catch (Exception ex)
         {
-            LastResult = "Capture failed; see dalamud.log.";
-            services.Log.Error(ex, "PentaPenta MateriaAttach diagnostic failed");
+            services.Log.Error(ex, "PentaPenta {Addon} diagnostic failed", addonName);
+            return false;
         }
     }
 }
