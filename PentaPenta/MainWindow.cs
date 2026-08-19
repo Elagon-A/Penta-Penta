@@ -64,7 +64,7 @@ internal sealed class MainWindow : Window
         ImGui.SameLine();
         var fullRunWasArmed = armFullRun;
         if (!fullRunWasArmed) ImGui.BeginDisabled();
-        if (ImGui.Button("Start full run"))
+        if (ImGui.Button("Start queue"))
         {
             controller.Start();
             armFullRun = false;

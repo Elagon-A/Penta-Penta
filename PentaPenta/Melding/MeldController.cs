@@ -25,6 +25,7 @@ internal sealed class MeldController : IDisposable
     private DateTime autoNextAction;
     private DateTime autoDeadline;
     private int autoCandidateIndex;
+    private int autoItemIndex;
     private string autoMateriaName = "";
     private int autoRetries;
 
@@ -45,11 +46,13 @@ internal sealed class MeldController : IDisposable
 
     public void Start()
     {
-        if (items.Count != 1) { Fail("This guarded build requires exactly one queued item."); return; }
+        if (items.Count == 0) { Fail("Prepare a queue with at least one item."); return; }
         if (!services.ClientState.IsLoggedIn) { Fail("You are not logged in."); return; }
         if (services.Condition[ConditionFlag.InCombat]) { Fail("Cannot start in combat."); return; }
-        if (items[0].MeldCount >= 5) { Fail("Selected item is already fully melded."); return; }
-        if (!items[0].AdvancedMeldingPermitted) { Fail("Selected item cannot be overmelded."); return; }
+        var unsupported = items.FirstOrDefault(x => x.MeldCount < 5 && !x.AdvancedMeldingPermitted);
+        if (unsupported is not null) { Fail($"{unsupported.Name} cannot be overmelded; remove it from the queue."); return; }
+        autoItemIndex = items.FindIndex(x => x.MeldCount < 5);
+        if (autoItemIndex < 0) { Fail("Every queued item is already fully melded."); return; }
         if (services.GameGui.GetAddonByName("MateriaAttach").IsNull)
         { State = RunState.WaitingForMeldingWindow; Status = "Open the Materia Melding window."; return; }
 
@@ -59,7 +62,7 @@ internal sealed class MeldController : IDisposable
         autoNextAction = DateTime.UtcNow;
         autoDeadline = DateTime.UtcNow.AddSeconds(15);
         State = RunState.Running;
-        Status = $"Starting guarded run at slot {items[0].MeldCount + 1} for {items[0].Name}...";
+        Status = $"Queue {autoItemIndex + 1}/{items.Count}: starting at slot {items[autoItemIndex].MeldCount + 1} for {items[autoItemIndex].Name}...";
     }
 
     public void Stop() { autoPhase = AutoPhase.None; advancedPhase = AdvancedPhase.None; State = RunState.Idle; Status = "Stopped by user."; }
@@ -218,16 +221,34 @@ internal sealed class MeldController : IDisposable
             return;
         }
 
-        var expected = items[0];
+        if (autoItemIndex < 0 || autoItemIndex >= items.Count)
+        { StopAutomaticWithError("Queue position became invalid; no meld was sent."); return; }
+
+        var expected = items[autoItemIndex];
         var currentMelds = CurrentMeldCount(expected);
         if (currentMelds < 0)
         { StopAutomaticWithError("Queued inventory slot no longer contains the expected item."); return; }
 
         if (currentMelds >= 5)
         {
-            autoPhase = AutoPhase.None;
-            State = RunState.Complete;
-            Status = $"QUEUE COMPLETE: {expected.Name} verified 5/5.";
+            services.Log.Information("Auto queue item {Index}/{Count} complete: {Item} verified 5/5", autoItemIndex + 1, items.Count, expected.Name);
+            do { autoItemIndex++; }
+            while (autoItemIndex < items.Count && CurrentMeldCount(items[autoItemIndex]) >= 5);
+
+            if (autoItemIndex >= items.Count)
+            {
+                autoPhase = AutoPhase.None;
+                State = RunState.Complete;
+                Status = $"QUEUE COMPLETE: all {items.Count} selected item(s) verified 5/5.";
+                return;
+            }
+
+            autoCandidateIndex = 0;
+            autoRetries = 0;
+            autoPhase = AutoPhase.SelectEquipment;
+            autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
+            autoDeadline = DateTime.UtcNow.AddSeconds(20);
+            Status = $"Queue {autoItemIndex + 1}/{items.Count}: advancing to {items[autoItemIndex].Name}...";
             return;
         }
 
@@ -245,7 +266,7 @@ internal sealed class MeldController : IDisposable
                 autoPhase = AutoPhase.ChooseCandidate;
                 autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
                 autoDeadline = DateTime.UtcNow.AddSeconds(15);
-                Status = $"Selected {expected.Name}; choosing materia for slot {currentMelds + 1}...";
+                Status = $"Queue {autoItemIndex + 1}/{items.Count}: selected {expected.Name}; choosing materia for slot {currentMelds + 1}...";
                 break;
             }
             case AutoPhase.ChooseCandidate:
