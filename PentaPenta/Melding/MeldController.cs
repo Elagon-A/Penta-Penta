@@ -21,6 +21,11 @@ internal sealed class MeldController : IDisposable
     private uint pendingMateriaId;
     private int startingMateriaCount;
     private int startingMeldCount;
+    private AutoPhase autoPhase;
+    private DateTime autoNextAction;
+    private DateTime autoDeadline;
+    private int autoCandidateIndex;
+    private string autoMateriaName = "";
 
     public MeldController(Services services, Configuration config)
     {
@@ -39,20 +44,23 @@ internal sealed class MeldController : IDisposable
 
     public void Start()
     {
-        if (items.Count == 0) { Fail("The queue is empty."); return; }
+        if (items.Count != 1) { Fail("This guarded build requires exactly one queued item."); return; }
         if (!services.ClientState.IsLoggedIn) { Fail("You are not logged in."); return; }
         if (services.Condition[ConditionFlag.InCombat]) { Fail("Cannot start in combat."); return; }
+        if (items[0].MeldCount != 0) { Fail("Full-run test requires an untouched 0/5 item."); return; }
+        if (!items[0].AdvancedMeldingPermitted) { Fail("Selected item cannot be overmelded."); return; }
         if (services.GameGui.GetAddonByName("MateriaAttach").IsNull)
         { State = RunState.WaitingForMeldingWindow; Status = "Open the Materia Melding window."; return; }
 
-        // Deliberately gated until the live client row/callback map is validated for this patch.
-        // The queue, identity checks, inventory snapshots and plan are ready; sending a stale
-        // callback here could consume expensive materia on the wrong item.
-        State = RunState.Ready;
-        Status = "Queue verified. Automation driver needs current-patch callback validation.";
+        autoCandidateIndex = 0;
+        autoPhase = AutoPhase.SelectEquipment;
+        autoNextAction = DateTime.UtcNow;
+        autoDeadline = DateTime.UtcNow.AddSeconds(15);
+        State = RunState.Running;
+        Status = $"Starting guarded five-slot run for {items[0].Name}...";
     }
 
-    public void Stop() { State = RunState.Idle; Status = "Stopped by user."; }
+    public void Stop() { autoPhase = AutoPhase.None; advancedPhase = AdvancedPhase.None; State = RunState.Idle; Status = "Stopped by user."; }
 
     public unsafe void ValidateOpenDetail()
     {
@@ -148,6 +156,12 @@ internal sealed class MeldController : IDisposable
 
     private unsafe void OnFrameworkUpdate(IFramework _)
     {
+        if (autoPhase != AutoPhase.None)
+        {
+            UpdateAutomaticRun();
+            return;
+        }
+
         if (advancedPhase == AdvancedPhase.None) return;
         if (DateTime.UtcNow > advancedDeadline)
         { advancedPhase = AdvancedPhase.None; Fail("Advanced meld timed out; inspect the item."); return; }
@@ -183,6 +197,185 @@ internal sealed class MeldController : IDisposable
         }
     }
 
+    private unsafe void UpdateAutomaticRun()
+    {
+        if (DateTime.UtcNow < autoNextAction) return;
+        if (DateTime.UtcNow > autoDeadline)
+        { StopAutomaticWithError("Automatic run timed out; inspect the item before continuing."); return; }
+
+        var expected = items[0];
+        var currentMelds = CurrentMeldCount(expected);
+        if (currentMelds < 0)
+        { StopAutomaticWithError("Queued inventory slot no longer contains the expected item."); return; }
+
+        if (currentMelds >= 5)
+        {
+            autoPhase = AutoPhase.None;
+            State = RunState.Complete;
+            Status = $"QUEUE COMPLETE: {expected.Name} verified 5/5.";
+            return;
+        }
+
+        switch (autoPhase)
+        {
+            case AutoPhase.SelectEquipment:
+            {
+                var main = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttach");
+                if (main == null || !main->IsReady) return;
+                var rows = FindStringRows(main, 147, expected.Name);
+                if (rows.Count != 1)
+                { StopAutomaticWithError(rows.Count == 0 ? "Expected equipment is not visible in Materia Melding." : "Duplicate visible equipment names are unsafe in this build."); return; }
+                FireInts(main, 1, rows[0] - 147, 1, 0);
+                autoPhase = AutoPhase.ChooseCandidate;
+                autoCandidateIndex = 0;
+                autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
+                autoDeadline = DateTime.UtcNow.AddSeconds(15);
+                Status = $"Selected {expected.Name}; choosing materia for slot {currentMelds + 1}...";
+                break;
+            }
+            case AutoPhase.ChooseCandidate:
+            {
+                var slot = currentMelds + 1;
+                var grade = MeldPlan.GradeForSlot(slot);
+                if (autoCandidateIndex >= MeldPlan.Priority.Length)
+                { StopAutomaticWithError($"No priority materia fits slot {slot} without overcapping."); return; }
+                var choice = MeldPlan.Priority[autoCandidateIndex];
+                autoMateriaName = MateriaName(choice.Stat, grade);
+                pendingMateriaId = grade == 12 ? choice.Grade12ItemId : choice.Grade11ItemId;
+                if (CountItem(pendingMateriaId) <= 0)
+                { autoCandidateIndex++; return; }
+
+                var main = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttach");
+                if (main == null || !main->IsReady) return;
+                var rows = FindStringRows(main, 429, autoMateriaName);
+                if (rows.Count != 1) { autoCandidateIndex++; return; }
+                FireInts(main, 2, rows[0] - 429, 1, 0);
+                autoPhase = AutoPhase.WaitDetail;
+                autoNextAction = DateTime.UtcNow.AddMilliseconds(200);
+                autoDeadline = DateTime.UtcNow.AddSeconds(8);
+                Status = $"Checking {autoMateriaName} for slot {slot}...";
+                break;
+            }
+            case AutoPhase.WaitDetail:
+            {
+                var detail = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttachDialog");
+                if (detail == null || !detail->IsReady) return;
+                var foundMateria = AtkString(detail, 9);
+                var gain = AtkString(detail, 10);
+                var foundItem = AtkString(detail, 16);
+                var grade = MeldPlan.GradeForSlot(currentMelds + 1);
+                var choice = MeldPlan.Priority[autoCandidateIndex];
+                var expectedGain = grade == 12 ? choice.Grade12Gain : choice.Grade11Gain;
+                if (foundMateria != autoMateriaName || !foundItem.StartsWith(expected.Name, StringComparison.Ordinal))
+                { StopAutomaticWithError("Materia detail identity mismatch; no meld was sent."); return; }
+                if (!gain.Contains($"+{expectedGain}", StringComparison.Ordinal))
+                {
+                    FireInts(detail, 1, 0, 0);
+                    autoCandidateIndex++;
+                    autoPhase = AutoPhase.ChooseCandidate;
+                    autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
+                    autoDeadline = DateTime.UtcNow.AddSeconds(15);
+                    Status = $"{autoMateriaName} would overcap; trying the next priority.";
+                    return;
+                }
+
+                startingMeldCount = currentMelds;
+                startingMateriaCount = CountItem(pendingMateriaId);
+                if (currentMelds < 2)
+                {
+                    FireInts(detail, 0, 0, 0);
+                    autoPhase = AutoPhase.Monitoring;
+                    autoDeadline = DateTime.UtcNow.AddSeconds(45);
+                    Status = $"Melding slot {currentMelds + 1}: {autoMateriaName}...";
+                }
+                else
+                {
+                    FireInts(detail, 0, 0, 1);
+                    autoPhase = AutoPhase.WaitYesNo;
+                    autoDeadline = DateTime.UtcNow.AddSeconds(10);
+                    Status = $"Opening bulk advanced meld for slot {currentMelds + 1}...";
+                }
+                break;
+            }
+            case AutoPhase.WaitYesNo:
+            {
+                var yesno = services.GameGui.GetAddonByName<AtkUnitBase>("SelectYesno");
+                if (yesno == null || !yesno->IsReady) return;
+                FireInts(yesno, 0);
+                autoPhase = AutoPhase.Monitoring;
+                autoDeadline = DateTime.UtcNow.AddMinutes(6);
+                Status = $"Bulk advanced meld running for slot {startingMeldCount + 1}...";
+                break;
+            }
+            case AutoPhase.Monitoring:
+            {
+                var count = CountItem(pendingMateriaId);
+                if (currentMelds > startingMeldCount)
+                {
+                    var used = Math.Max(0, startingMateriaCount - count);
+                    Status = $"Slot {currentMelds} succeeded with {autoMateriaName}; {used} consumed.";
+                    autoPhase = AutoPhase.WaitReturn;
+                    autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
+                    autoDeadline = DateTime.UtcNow.AddSeconds(20);
+                }
+                else if (count <= 0)
+                    StopAutomaticWithError("Materia reached zero before success; inspect the item.");
+                break;
+            }
+            case AutoPhase.WaitReturn:
+            {
+                var detail = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttachDialog");
+                if (detail != null && detail->IsReady)
+                {
+                    FireInts(detail, 1, 0, 0);
+                    autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
+                    return;
+                }
+                var main = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttach");
+                if (main == null || !main->IsReady) return;
+                autoPhase = AutoPhase.SelectEquipment;
+                autoDeadline = DateTime.UtcNow.AddSeconds(15);
+                break;
+            }
+        }
+    }
+
+    private unsafe List<int> FindStringRows(AtkUnitBase* addon, int start, string exact)
+    {
+        var found = new List<int>();
+        for (var i = start; i < addon->AtkValuesCount; i++)
+            if (AtkString(addon, i).StartsWith(exact, StringComparison.Ordinal)) found.Add(i);
+        return found;
+    }
+
+    private static unsafe string AtkString(AtkUnitBase* addon, int index)
+    {
+        if (index < 0 || index >= addon->AtkValuesCount) return "";
+        var type = addon->AtkValues[index].Type.ToString();
+        return type is "String" or "String8" ? addon->AtkValues[index].String.ExtractText().Trim() : "";
+    }
+
+    private static unsafe void FireInts(AtkUnitBase* addon, params int[] values)
+    {
+        var args = stackalloc AtkValue[values.Length];
+        for (var i = 0; i < values.Length; i++)
+        { args[i].Type = AtkValueType.Int; args[i].Int = values[i]; }
+        addon->FireCallback((uint)values.Length, args, true);
+    }
+
+    private static string MateriaName(MeldStat stat, int grade) => (stat, grade) switch
+    {
+        (MeldStat.CriticalHit, 12) => "Savage Aim Materia XII",
+        (MeldStat.CriticalHit, _) => "Savage Aim Materia XI",
+        (MeldStat.DirectHit, 12) => "Heavens' Eye Materia XII",
+        (MeldStat.DirectHit, _) => "Heavens' Eye Materia XI",
+        (MeldStat.Determination, 12) => "Savage Might Materia XII",
+        _ => "Savage Might Materia XI"
+    };
+
+    private void StopAutomaticWithError(string message)
+    { autoPhase = AutoPhase.None; Fail(message); }
+
     private int CountItem(uint itemId)
     {
         var total = 0;
@@ -214,4 +407,5 @@ internal sealed class MeldController : IDisposable
     private void Fail(string message) { State = RunState.Error; Status = message; services.Log.Warning(message); }
 
     private enum AdvancedPhase { None, WaitingForConfirmation, Monitoring }
+    private enum AutoPhase { None, SelectEquipment, ChooseCandidate, WaitDetail, WaitYesNo, Monitoring, WaitReturn }
 }

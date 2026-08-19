@@ -18,6 +18,7 @@ internal sealed class MainWindow : Window
     private string filter = "";
     private bool armSingleMeld;
     private bool armAdvancedMeld;
+    private bool armFullRun;
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, MateriaDiagnostics diagnostics)
         : base("PentaPenta###PentaPentaMain", ImGuiWindowFlags.NoScrollbar)
@@ -59,7 +60,16 @@ internal sealed class MainWindow : Window
         ImGui.Separator(); ImGui.TextWrapped($"Status: {controller.Status}");
         if (ImGui.Button("Prepare queue")) controller.Load(gear.Where(x => selected.Contains(Key(x))));
         ImGui.SameLine();
-        if (ImGui.Button("Start")) controller.Start();
+        ImGui.Checkbox("Arm full run", ref armFullRun);
+        ImGui.SameLine();
+        var fullRunWasArmed = armFullRun;
+        if (!fullRunWasArmed) ImGui.BeginDisabled();
+        if (ImGui.Button("Start full run"))
+        {
+            controller.Start();
+            armFullRun = false;
+        }
+        if (!fullRunWasArmed) ImGui.EndDisabled();
         ImGui.SameLine();
         if (ImGui.Button("Stop")) controller.Stop();
         ImGui.Separator();
