@@ -262,7 +262,7 @@ internal sealed class MeldController : IDisposable
 
                 var main = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttach");
                 if (main == null || !main->IsReady) return;
-                var rows = FindStringRows(main, 429, autoMateriaName);
+                var rows = FindExactStringRows(main, 429, autoMateriaName);
                 if (rows.Count != 1) { autoCandidateIndex++; return; }
                 FireInts(main, 2, rows[0] - 429, 1, 0);
                 services.Log.Information("Auto phase ChooseCandidate: row {Row}, materia {Materia}", rows[0] - 429, autoMateriaName);
@@ -366,6 +366,14 @@ internal sealed class MeldController : IDisposable
         var found = new List<int>();
         for (var i = start; i < addon->AtkValuesCount; i++)
             if (AtkString(addon, i).StartsWith(exact, StringComparison.Ordinal)) found.Add(i);
+        return found;
+    }
+
+    private unsafe List<int> FindExactStringRows(AtkUnitBase* addon, int start, string exact)
+    {
+        var found = new List<int>();
+        for (var i = start; i < addon->AtkValuesCount; i++)
+            if (string.Equals(AtkString(addon, i), exact, StringComparison.Ordinal)) found.Add(i);
         return found;
     }
 
