@@ -10,6 +10,9 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - Slots 1–3 use grade XII; slots 4–5 use grade XI.
 - Strict no-overcap, inventory identity, combat, login, window, timeout, and materia-quantity gates are enforced.
 - Fresh and partially completed items can be queued; completed items are skipped after live 5/5 verification.
+- Live grade XI/XII materia inventory counts update during a run and highlight low or empty stock.
+- Eligible inventory gear has a **Pentameld** context-menu action that opens PentaPenta with the exact bag/slot selected.
+- Preparing a queue opens the Materia Melding window automatically when it is available.
 - Duplicate visible equipment names stop safely because the Materia Melding list does not expose bag/slot identity.
 
 ## Build and install

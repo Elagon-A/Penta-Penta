@@ -2,6 +2,7 @@ using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility;
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using PentaPenta.Models;
 
 namespace PentaPenta.Melding;
@@ -15,6 +16,28 @@ internal sealed class MeldController : IDisposable
     public RunState State { get; private set; } = RunState.Idle;
     public string Status { get; private set; } = "Idle";
     public IReadOnlyList<InventoryGear> Items => items;
+    public bool IsQueueRunning => autoPhase != AutoPhase.None;
+    public int QueuePosition => items.Count == 0 ? 0 : Math.Clamp(autoItemIndex + 1, 1, items.Count);
+    public int QueueCount => items.Count;
+    public int CompletedMelds => autoCompletedMelds;
+    public int TotalMelds => autoTotalMelds;
+    public string CurrentItemName => autoItemIndex >= 0 && autoItemIndex < items.Count ? items[autoItemIndex].Name : "";
+    public TimeSpan Elapsed => autoStartedAt == default
+        ? TimeSpan.Zero
+        : (autoFinishedAt == default ? DateTime.UtcNow : autoFinishedAt) - autoStartedAt;
+    public TimeSpan? EstimatedRemaining => autoCompletedMelds <= 0
+        ? null
+        : TimeSpan.FromTicks((long)(Elapsed.Ticks / (double)autoCompletedMelds * Math.Max(0, autoTotalMelds - autoCompletedMelds)));
+    public int MateriaConsumed
+    {
+        get
+        {
+            var inProgress = autoPhase == AutoPhase.Monitoring
+                ? Math.Max(0, startingMateriaCount - CountItem(pendingMateriaId))
+                : 0;
+            return autoMateriaConsumed + inProgress;
+        }
+    }
     private readonly List<InventoryGear> items = [];
     private AdvancedPhase advancedPhase;
     private DateTime advancedDeadline;
@@ -28,6 +51,11 @@ internal sealed class MeldController : IDisposable
     private int autoItemIndex;
     private string autoMateriaName = "";
     private int autoRetries;
+    private int autoTotalMelds;
+    private int autoCompletedMelds;
+    private int autoMateriaConsumed;
+    private DateTime autoStartedAt;
+    private DateTime autoFinishedAt;
 
     public MeldController(Services services, Configuration config)
     {
@@ -40,8 +68,31 @@ internal sealed class MeldController : IDisposable
     {
         items.Clear();
         items.AddRange(selected);
+        autoTotalMelds = 0;
+        autoCompletedMelds = 0;
+        autoMateriaConsumed = 0;
+        autoStartedAt = default;
+        autoFinishedAt = default;
         State = items.Count == 0 ? RunState.Idle : RunState.WaitingForMeldingWindow;
         Status = items.Count == 0 ? "Select at least one item." : "Open Materia Melding, then press Start.";
+    }
+
+    public unsafe void PrepareAndOpenMelding(IEnumerable<InventoryGear> selected)
+    {
+        Load(selected);
+        if (items.Count == 0) return;
+        if (!services.ClientState.IsLoggedIn) { Fail("You are not logged in."); return; }
+        if (services.Condition[ConditionFlag.InCombat]) { Fail("Cannot open Materia Melding in combat."); return; }
+        if (!services.GameGui.GetAddonByName("MateriaAttach").IsNull)
+        { Status = $"Queue prepared with {items.Count} item(s). Arm and start when ready."; return; }
+
+        var agent = AgentMateriaAttach.Instance();
+        if (agent == null || !agent->IsActivatable())
+        { Fail("Materia Melding is not currently available. Check your location and crafting job access."); return; }
+
+        agent->Show();
+        State = RunState.WaitingForMeldingWindow;
+        Status = $"Queue prepared with {items.Count} item(s); opening Materia Melding...";
     }
 
     public void Start()
@@ -49,15 +100,22 @@ internal sealed class MeldController : IDisposable
         if (items.Count == 0) { Fail("Prepare a queue with at least one item."); return; }
         if (!services.ClientState.IsLoggedIn) { Fail("You are not logged in."); return; }
         if (services.Condition[ConditionFlag.InCombat]) { Fail("Cannot start in combat."); return; }
-        var unsupported = items.FirstOrDefault(x => x.MeldCount < 5 && !x.AdvancedMeldingPermitted);
+        var unsupported = items.FirstOrDefault(x => CurrentMeldCount(x) < 5 && !x.AdvancedMeldingPermitted);
         if (unsupported is not null) { Fail($"{unsupported.Name} cannot be overmelded; remove it from the queue."); return; }
-        autoItemIndex = items.FindIndex(x => x.MeldCount < 5);
+        var liveMeldCounts = items.Select(CurrentMeldCount).ToArray();
+        if (liveMeldCounts.Any(x => x < 0)) { Fail("A queued inventory slot no longer contains the expected item."); return; }
+        autoItemIndex = Array.FindIndex(liveMeldCounts, x => x < 5);
         if (autoItemIndex < 0) { Fail("Every queued item is already fully melded."); return; }
         if (services.GameGui.GetAddonByName("MateriaAttach").IsNull)
         { State = RunState.WaitingForMeldingWindow; Status = "Open the Materia Melding window."; return; }
 
         autoCandidateIndex = 0;
         autoRetries = 0;
+        autoTotalMelds = liveMeldCounts.Sum(x => Math.Max(0, 5 - x));
+        autoCompletedMelds = 0;
+        autoMateriaConsumed = 0;
+        autoStartedAt = DateTime.UtcNow;
+        autoFinishedAt = default;
         autoPhase = AutoPhase.SelectEquipment;
         autoNextAction = DateTime.UtcNow;
         autoDeadline = DateTime.UtcNow.AddSeconds(15);
@@ -65,7 +123,7 @@ internal sealed class MeldController : IDisposable
         Status = $"Queue {autoItemIndex + 1}/{items.Count}: starting at slot {items[autoItemIndex].MeldCount + 1} for {items[autoItemIndex].Name}...";
     }
 
-    public void Stop() { autoPhase = AutoPhase.None; advancedPhase = AdvancedPhase.None; State = RunState.Idle; Status = "Stopped by user."; }
+    public void Stop() { autoPhase = AutoPhase.None; advancedPhase = AdvancedPhase.None; autoFinishedAt = DateTime.UtcNow; State = RunState.Idle; Status = "Stopped by user."; }
 
     public unsafe void ValidateOpenDetail()
     {
@@ -229,7 +287,9 @@ internal sealed class MeldController : IDisposable
         if (currentMelds < 0)
         { StopAutomaticWithError("Queued inventory slot no longer contains the expected item."); return; }
 
-        if (currentMelds >= 5)
+        // Let Monitoring account for the final successful meld and its materia cost
+        // before advancing to the next queue item.
+        if (currentMelds >= 5 && autoPhase != AutoPhase.Monitoring)
         {
             services.Log.Information("Auto queue item {Index}/{Count} complete: {Item} verified 5/5", autoItemIndex + 1, items.Count, expected.Name);
             do { autoItemIndex++; }
@@ -238,6 +298,7 @@ internal sealed class MeldController : IDisposable
             if (autoItemIndex >= items.Count)
             {
                 autoPhase = AutoPhase.None;
+                autoFinishedAt = DateTime.UtcNow;
                 State = RunState.Complete;
                 Status = $"QUEUE COMPLETE: all {items.Count} selected item(s) verified 5/5.";
                 return;
@@ -354,6 +415,8 @@ internal sealed class MeldController : IDisposable
                 if (currentMelds > startingMeldCount)
                 {
                     var used = Math.Max(0, startingMateriaCount - count);
+                    autoCompletedMelds += currentMelds - startingMeldCount;
+                    autoMateriaConsumed += used;
                     Status = $"Slot {currentMelds} succeeded with {autoMateriaName}; {used} consumed.";
                     autoPhase = AutoPhase.WaitReturn;
                     autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
@@ -424,7 +487,7 @@ internal sealed class MeldController : IDisposable
     };
 
     private void StopAutomaticWithError(string message)
-    { autoPhase = AutoPhase.None; Fail(message); }
+    { autoPhase = AutoPhase.None; autoFinishedAt = DateTime.UtcNow; Fail(message); }
 
     private int CountItem(uint itemId)
     {

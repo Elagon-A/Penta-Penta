@@ -12,6 +12,8 @@ internal sealed class InventoryScanner(Services services)
         GameInventoryType.Inventory3, GameInventoryType.Inventory4
     ];
 
+    internal static bool IsPlayerBag(GameInventoryType type) => Bags.Contains(type);
+
     public List<InventoryGear> Scan()
     {
         var result = new List<InventoryGear>();
@@ -30,4 +32,24 @@ internal sealed class InventoryScanner(Services services)
         }
         return result.OrderBy(x => x.Name).ThenBy(x => x.Container).ThenBy(x => x.Slot).ToList();
     }
+
+    public List<MateriaStock> ScanMateriaStock()
+    {
+        var counts = new Dictionary<uint, int>();
+        foreach (var bag in Bags)
+        foreach (ref readonly var slot in services.Inventory.GetInventoryItems(bag))
+        {
+            if (slot.IsEmpty) continue;
+            counts[slot.BaseItemId] = counts.GetValueOrDefault(slot.BaseItemId) + slot.Quantity;
+        }
+
+        return
+        [
+            new("Critical Hit", counts.GetValueOrDefault(41772u), counts.GetValueOrDefault(41759u)),
+            new("Direct Hit", counts.GetValueOrDefault(41771u), counts.GetValueOrDefault(41758u)),
+            new("Determination", counts.GetValueOrDefault(41773u), counts.GetValueOrDefault(41760u)),
+        ];
+    }
 }
+
+internal sealed record MateriaStock(string Stat, int Grade12, int Grade11);

@@ -1,5 +1,6 @@
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Game.Inventory;
 using Dalamud.Interface.Windowing;
 using PentaPenta.Melding;
 using PentaPenta.Models;
@@ -14,6 +15,8 @@ internal sealed class MainWindow : Window
     private readonly MeldController controller;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
+    private List<MateriaStock> materiaStock = [];
+    private DateTime nextMateriaStockRefresh;
     private string filter = "";
     private bool armFullRun;
 
@@ -21,12 +24,13 @@ internal sealed class MainWindow : Window
         : base("PentaPenta###PentaPentaMain", ImGuiWindowFlags.NoScrollbar)
     {
         this.services = services; this.config = config; this.scanner = scanner; this.controller = controller;
-        SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 390), MaximumSize = new Vector2(float.MaxValue) };
+        SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 500), MaximumSize = new Vector2(float.MaxValue) };
         Refresh();
     }
 
     public override void Draw()
     {
+        RefreshMateriaStockIfDue();
         ImGui.TextWrapped("Select inventory gear, arrange your queue, then open Materia Melding. Each item is tracked by bag and slot so duplicate rings remain distinct.");
         ImGui.Separator();
         if (ImGui.Button("Refresh inventory")) Refresh();
@@ -52,11 +56,39 @@ internal sealed class MainWindow : Window
             ImGui.EndTable();
         }
 
+        ImGui.TextUnformatted("Materia inventory");
+        ImGui.SameLine();
+        ImGui.TextDisabled("live · low-stock warning below 25");
+        if (ImGui.BeginTable("materia-stock", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH))
+        {
+            ImGui.TableSetupColumn("Stat");
+            ImGui.TableSetupColumn("Grade XII", ImGuiTableColumnFlags.WidthFixed, 110);
+            ImGui.TableSetupColumn("Grade XI", ImGuiTableColumnFlags.WidthFixed, 110);
+            ImGui.TableHeadersRow();
+            foreach (var stock in materiaStock)
+            {
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(stock.Stat);
+                ImGui.TableNextColumn(); DrawStockCount(stock.Grade12);
+                ImGui.TableNextColumn(); DrawStockCount(stock.Grade11);
+            }
+            ImGui.EndTable();
+        }
+
         ImGui.Text("Plan: Critical Hit  >  Direct Hit  >  Determination");
         ImGui.TextDisabled("Slots 1–3: grade XII   |   Slots 4–5: grade XI   |   strict no-overcap");
         ImGui.Separator();
         ImGui.TextWrapped($"Status: {controller.Status}");
-        if (ImGui.Button("Prepare queue")) controller.Load(gear.Where(x => selected.Contains(Key(x))));
+        if (controller.IsQueueRunning || controller.TotalMelds > 0)
+        {
+            var fraction = controller.TotalMelds == 0 ? 0f : controller.CompletedMelds / (float)controller.TotalMelds;
+            ImGui.ProgressBar(fraction, new Vector2(-1, 0), $"{controller.CompletedMelds} / {controller.TotalMelds} melds");
+            if (controller.QueueCount > 0 && controller.CurrentItemName.Length > 0)
+                ImGui.TextUnformatted($"Item {controller.QueuePosition}/{controller.QueueCount}: {controller.CurrentItemName}");
+            var eta = controller.EstimatedRemaining is { } remaining ? FormatDuration(remaining) : "calculating...";
+            ImGui.TextDisabled($"Elapsed {FormatDuration(controller.Elapsed)}   |   ETA {eta}   |   Materia consumed {controller.MateriaConsumed}");
+        }
+        if (ImGui.Button("Prepare queue")) controller.PrepareAndOpenMelding(gear.Where(x => selected.Contains(Key(x))));
         ImGui.SameLine();
         ImGui.Checkbox("Arm full run", ref armFullRun);
         ImGui.SameLine();
@@ -85,6 +117,38 @@ internal sealed class MainWindow : Window
         }
 
         if (selected.Count != config.Queue.Count) SaveQueue();
+        materiaStock = scanner.ScanMateriaStock();
+        nextMateriaStockRefresh = DateTime.UtcNow.AddMilliseconds(250);
+    }
+    internal void SelectInventoryItem(GameInventoryItem target)
+    {
+        Refresh();
+        var match = gear.FirstOrDefault(x => x.Container == target.ContainerType
+            && x.Slot == target.InventorySlot
+            && x.ItemId == target.BaseItemId
+            && x.Hq == target.IsHq);
+        if (match is null) return;
+
+        selected.Clear();
+        selected.Add(Key(match));
+        SaveQueue();
+        controller.Load([match]);
+        IsOpen = true;
+    }
+    private void RefreshMateriaStockIfDue()
+    {
+        if (DateTime.UtcNow < nextMateriaStockRefresh) return;
+        materiaStock = scanner.ScanMateriaStock();
+        nextMateriaStockRefresh = DateTime.UtcNow.AddMilliseconds(250);
+    }
+    private static void DrawStockCount(int count)
+    {
+        var color = count == 0
+            ? new Vector4(1f, 0.3f, 0.3f, 1f)
+            : count < 25
+                ? new Vector4(1f, 0.75f, 0.25f, 1f)
+                : new Vector4(0.65f, 1f, 0.65f, 1f);
+        ImGui.TextColored(color, count.ToString("N0"));
     }
     private void SaveQueue()
     {
@@ -92,6 +156,9 @@ internal sealed class MainWindow : Window
         services.PluginInterface.SavePluginConfig(config);
     }
     private static string Key(InventoryGear x) => $"{(int)x.Container}:{x.Slot}:{x.ItemId}:{x.Hq}";
+    private static string FormatDuration(TimeSpan value) => value.TotalHours >= 1
+        ? $"{(int)value.TotalHours}:{value.Minutes:00}:{value.Seconds:00}"
+        : $"{(int)value.TotalMinutes}:{value.Seconds:00}";
     private static int BagNumber(Dalamud.Game.Inventory.GameInventoryType type) => type switch
     {
         Dalamud.Game.Inventory.GameInventoryType.Inventory1 => 1,

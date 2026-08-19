@@ -12,6 +12,7 @@ internal sealed class Services(
     IGameGui gameGui,
     IClientState clientState,
     ICondition condition,
+    IContextMenu contextMenu,
     IPluginLog log)
 {
     internal IDalamudPluginInterface PluginInterface { get; } = pluginInterface;
@@ -22,5 +23,6 @@ internal sealed class Services(
     internal IGameGui GameGui { get; } = gameGui;
     internal IClientState ClientState { get; } = clientState;
     internal ICondition Condition { get; } = condition;
+    internal IContextMenu ContextMenu { get; } = contextMenu;
     internal IPluginLog Log { get; } = log;
 }
