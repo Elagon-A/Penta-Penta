@@ -12,14 +12,15 @@ internal sealed class MainWindow : Window
     private readonly Configuration config;
     private readonly InventoryScanner scanner;
     private readonly MeldController controller;
+    private readonly MateriaDiagnostics diagnostics;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private string filter = "";
 
-    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller)
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, MateriaDiagnostics diagnostics)
         : base("PentaPenta###PentaPentaMain", ImGuiWindowFlags.NoScrollbar)
     {
-        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller;
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.diagnostics = diagnostics;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 460), MaximumSize = new Vector2(float.MaxValue) };
         Refresh();
     }
@@ -44,7 +45,7 @@ internal sealed class MainWindow : Window
                 ImGui.PushID(key); ImGui.TableNextRow(); ImGui.TableNextColumn();
                 if (ImGui.Checkbox("##select", ref check)) { if (check) selected.Add(key); else selected.Remove(key); SaveQueue(); }
                 ImGui.TableNextColumn(); ImGui.TextUnformatted(item.Name + (item.Hq ? " ★" : ""));
-                ImGui.TableNextColumn(); ImGui.TextUnformatted($"Bag {(int)item.Container} / slot {item.Slot + 1}");
+                ImGui.TableNextColumn(); ImGui.TextUnformatted($"Bag {BagNumber(item.Container)} / slot {item.Slot + 1}");
                 ImGui.TableNextColumn(); ImGui.TextUnformatted($"{item.MeldCount}/5");
                 ImGui.TableNextColumn(); ImGui.TextUnformatted(item.AdvancedMeldingPermitted ? "Yes" : "No"); ImGui.PopID();
             }
@@ -59,6 +60,10 @@ internal sealed class MainWindow : Window
         if (ImGui.Button("Start")) controller.Start();
         ImGui.SameLine();
         if (ImGui.Button("Stop")) controller.Stop();
+        ImGui.Separator();
+        ImGui.TextDisabled("Read-only validation (does not click or meld):");
+        if (ImGui.Button("Capture Materia window map")) diagnostics.Capture();
+        ImGui.SameLine(); ImGui.TextWrapped(diagnostics.LastResult);
     }
 
     private void Refresh() { gear = scanner.Scan(); selected.Clear(); foreach (var q in config.Queue) selected.Add($"{q.Container}:{q.Slot}:{q.ItemId}:{q.Hq}"); }
@@ -68,4 +73,12 @@ internal sealed class MainWindow : Window
         services.PluginInterface.SavePluginConfig(config);
     }
     private static string Key(InventoryGear x) => $"{(int)x.Container}:{x.Slot}:{x.ItemId}:{x.Hq}";
+    private static int BagNumber(Dalamud.Game.Inventory.GameInventoryType type) => type switch
+    {
+        Dalamud.Game.Inventory.GameInventoryType.Inventory1 => 1,
+        Dalamud.Game.Inventory.GameInventoryType.Inventory2 => 2,
+        Dalamud.Game.Inventory.GameInventoryType.Inventory3 => 3,
+        Dalamud.Game.Inventory.GameInventoryType.Inventory4 => 4,
+        _ => (int)type
+    };
 }
