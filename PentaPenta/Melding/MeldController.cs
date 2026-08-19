@@ -243,7 +243,6 @@ internal sealed class MeldController : IDisposable
                 FireInts(main, 1, rows[0] - 147, 1, 0);
                 services.Log.Information("Auto phase SelectEquipment: row {Row}, item {Item}", rows[0] - 147, expected.Name);
                 autoPhase = AutoPhase.ChooseCandidate;
-                autoCandidateIndex = 0;
                 autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
                 autoDeadline = DateTime.UtcNow.AddSeconds(15);
                 Status = $"Selected {expected.Name}; choosing materia for slot {currentMelds + 1}...";
@@ -288,8 +287,11 @@ internal sealed class MeldController : IDisposable
                 if (!gain.Contains($"+{expectedGain}", StringComparison.Ordinal))
                 {
                     FireInts(detail, 1, 0, 0);
+                    services.Log.Information(
+                        "Auto rejected {Materia}: displayed gain {Gain}, expected +{ExpectedGain}; reselecting equipment before fallback",
+                        autoMateriaName, gain, expectedGain);
                     autoCandidateIndex++;
-                    autoPhase = AutoPhase.ChooseCandidate;
+                    autoPhase = AutoPhase.SelectEquipment;
                     autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
                     autoDeadline = DateTime.UtcNow.AddSeconds(15);
                     Status = $"{autoMateriaName} would overcap; trying the next priority.";
@@ -351,6 +353,7 @@ internal sealed class MeldController : IDisposable
                 }
                 var main = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttach");
                 if (main == null || !main->IsReady) return;
+                autoCandidateIndex = 0;
                 autoPhase = AutoPhase.SelectEquipment;
                 autoDeadline = DateTime.UtcNow.AddSeconds(15);
                 break;
