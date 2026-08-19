@@ -27,8 +27,7 @@ public sealed class Plugin : IDalamudPlugin
         var config = pi.GetPluginConfig() as Configuration ?? new Configuration();
         var scanner = new InventoryScanner(services);
         controller = new Melding.MeldController(services, config);
-        var diagnostics = new Melding.MateriaDiagnostics(services);
-        main = new MainWindow(services, config, scanner, controller, diagnostics);
+        main = new MainWindow(services, config, scanner, controller);
         windows.AddWindow(main);
         services.Commands.AddHandler("/pentapenta", new CommandInfo((_, _) => main.Toggle()) { HelpMessage = "Open PentaPenta." });
         pi.UiBuilder.Draw += windows.Draw;

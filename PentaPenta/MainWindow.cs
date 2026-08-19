@@ -12,19 +12,16 @@ internal sealed class MainWindow : Window
     private readonly Configuration config;
     private readonly InventoryScanner scanner;
     private readonly MeldController controller;
-    private readonly MateriaDiagnostics diagnostics;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private string filter = "";
-    private bool armSingleMeld;
-    private bool armAdvancedMeld;
     private bool armFullRun;
 
-    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, MateriaDiagnostics diagnostics)
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller)
         : base("PentaPenta###PentaPentaMain", ImGuiWindowFlags.NoScrollbar)
     {
-        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.diagnostics = diagnostics;
-        SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 460), MaximumSize = new Vector2(float.MaxValue) };
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller;
+        SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 390), MaximumSize = new Vector2(float.MaxValue) };
         Refresh();
     }
 
@@ -57,7 +54,8 @@ internal sealed class MainWindow : Window
 
         ImGui.Text("Plan: Critical Hit  >  Direct Hit  >  Determination");
         ImGui.TextDisabled("Slots 1–3: grade XII   |   Slots 4–5: grade XI   |   strict no-overcap");
-        ImGui.Separator(); ImGui.TextWrapped($"Status: {controller.Status}");
+        ImGui.Separator();
+        ImGui.TextWrapped($"Status: {controller.Status}");
         if (ImGui.Button("Prepare queue")) controller.Load(gear.Where(x => selected.Contains(Key(x))));
         ImGui.SameLine();
         ImGui.Checkbox("Arm full run", ref armFullRun);
@@ -72,33 +70,22 @@ internal sealed class MainWindow : Window
         if (!fullRunWasArmed) ImGui.EndDisabled();
         ImGui.SameLine();
         if (ImGui.Button("Stop")) controller.Stop();
-        ImGui.Separator();
-        ImGui.TextDisabled("Read-only validation (does not click or meld):");
-        if (ImGui.Button("Capture Materia window map")) diagnostics.Capture();
-        ImGui.SameLine(); ImGui.TextWrapped(diagnostics.LastResult);
-        if (ImGui.Button("Validate open choice (no meld)")) controller.ValidateOpenDetail();
-        ImGui.Separator();
-        ImGui.Checkbox("Arm one guaranteed meld", ref armSingleMeld);
-        var wasArmed = armSingleMeld;
-        if (!wasArmed) ImGui.BeginDisabled();
-        if (ImGui.Button("Meld one verified materia"))
-        {
-            controller.ExecuteOneVerifiedGuaranteedMeld();
-            armSingleMeld = false;
-        }
-        if (!wasArmed) ImGui.EndDisabled();
-        ImGui.Checkbox("Arm one bulk advanced meld", ref armAdvancedMeld);
-        var advancedWasArmed = armAdvancedMeld;
-        if (!advancedWasArmed) ImGui.BeginDisabled();
-        if (ImGui.Button("Run one verified advanced meld"))
-        {
-            controller.ExecuteOneVerifiedAdvancedMeld();
-            armAdvancedMeld = false;
-        }
-        if (!advancedWasArmed) ImGui.EndDisabled();
+        ImGui.TextDisabled("Keep Materia Melding open and do not interact with either window while the queue is running.");
     }
 
-    private void Refresh() { gear = scanner.Scan(); selected.Clear(); foreach (var q in config.Queue) selected.Add($"{q.Container}:{q.Slot}:{q.ItemId}:{q.Hq}"); }
+    private void Refresh()
+    {
+        gear = scanner.Scan();
+        var available = gear.Select(Key).ToHashSet();
+        selected.Clear();
+        foreach (var q in config.Queue)
+        {
+            var key = $"{q.Container}:{q.Slot}:{q.ItemId}:{q.Hq}";
+            if (available.Contains(key)) selected.Add(key);
+        }
+
+        if (selected.Count != config.Queue.Count) SaveQueue();
+    }
     private void SaveQueue()
     {
         config.Queue = gear.Where(x => selected.Contains(Key(x))).Select(x => new QueuedItem(x.ItemId, x.Name, (int)x.Container, x.Slot, x.Hq)).ToList();

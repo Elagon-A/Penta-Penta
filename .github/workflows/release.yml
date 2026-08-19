@@ -1,0 +1,87 @@
+name: Build and release plugin
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "PentaPenta/**"
+      - "PentaPenta.slnx"
+      - "dist/repo.json"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Read plugin version
+        id: version
+        shell: bash
+        run: |
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' PentaPenta/PentaPenta.csproj)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Skip an existing release
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download Dalamud API
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/dalamud"
+          curl --fail --location --retry 3 \
+            https://goatcorp.github.io/dalamud-distrib/latest.zip \
+            --output "$RUNNER_TEMP/dalamud.zip"
+          unzip -q "$RUNNER_TEMP/dalamud.zip" -d "$RUNNER_TEMP/dalamud"
+
+      - name: Restore and build
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          DALAMUD_HOME: ${{ runner.temp }}/dalamud
+        run: |
+          dotnet restore PentaPenta.slnx --locked-mode
+          dotnet build PentaPenta.slnx -c Release --no-restore
+
+      - name: Package and verify
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p release
+          cd PentaPenta/bin/Release
+          zip -j "$GITHUB_WORKSPACE/release/latest.zip" \
+            PentaPenta.json PentaPenta.dll PentaPenta.deps.json
+          cd "$GITHUB_WORKSPACE"
+          cp dist/repo.json release/repo.json
+          unzip -p release/latest.zip PentaPenta.json | grep -F "\"AssemblyVersion\": \"$VERSION.0\""
+          grep -F "\"AssemblyVersion\": \"$VERSION.0\"" release/repo.json
+
+      - name: Create GitHub release
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" release/latest.zip release/repo.json \
+            --target "$GITHUB_SHA" \
+            --title "PentaPenta $RELEASE_TAG" \
+            --generate-notes
