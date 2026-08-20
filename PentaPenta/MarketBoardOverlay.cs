@@ -208,9 +208,19 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         // Reproduce the field's real mouse-click event. This switches Item Search
         // out of the selected category (for example Gladiator's Arms) and into
         // text/partial-match mode, which is what enables the Search button.
-        var clickEvent = (AtkEvent*)inputNode->AtkResNode.AtkEventManager.Event;
+        var textInputBase = (AtkComponentInputBase*)addon->SearchTextInput;
+        var collisionNode = textInputBase->CollisionNode;
+        var clickEvent = collisionNode == null
+            ? null
+            : (AtkEvent*)collisionNode->AtkResNode.AtkEventManager.Event;
         while (clickEvent != null && clickEvent->State.EventType != AtkEventType.MouseClick)
             clickEvent = clickEvent->NextEvent;
+        if (clickEvent == null)
+        {
+            clickEvent = (AtkEvent*)inputNode->AtkResNode.AtkEventManager.Event;
+            while (clickEvent != null && clickEvent->State.EventType != AtkEventType.MouseClick)
+                clickEvent = clickEvent->NextEvent;
+        }
         if (clickEvent == null)
         {
             CancelPending("The native market search field had no click event.");
