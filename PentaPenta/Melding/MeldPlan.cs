@@ -17,4 +17,17 @@ internal static class MeldPlan
     // advanced slot. Later advanced slots require the previous grade.
     public static int GradeForSlot(int slot, int nativeMateriaSlots) =>
         slot <= nativeMateriaSlots + 1 ? 12 : 11;
+
+    public static PlannedMateria? Resolve(CraftingMateria materia) => materia switch
+    {
+        CraftingMateria.CraftsmanshipXII => new("Craftsman's Competence Materia XII", 41778, 33, 12),
+        CraftingMateria.CraftsmanshipXI => new("Craftsman's Competence Materia XI", 41765, 22, 11),
+        CraftingMateria.ControlXII => new("Craftsman's Command Materia XII", 41780, 23, 12),
+        CraftingMateria.ControlXI => new("Craftsman's Command Materia XI", 41767, 15, 11),
+        CraftingMateria.CpXII => new("Craftsman's Cunning Materia XII", 41779, 11, 12),
+        CraftingMateria.CpXI => new("Craftsman's Cunning Materia XI", 41766, 9, 11),
+        _ => null,
+    };
 }
+
+internal sealed record PlannedMateria(string Name, uint ItemId, int Gain, int Grade);

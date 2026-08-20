@@ -14,6 +14,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - Eligible inventory gear has a **Pentameld** context-menu action that opens PentaPenta with the exact bag/slot selected.
 - Preparing a queue opens the Materia Melding window automatically when it is available.
 - Overcap rejections are cached per item and grade during a queue so later slots skip choices already proven not to fit.
+- Exact crafting presets can assign Craftsmanship, Control, or CP materia in grade XI/XII to each of an item's five slots.
 - Duplicate visible equipment names stop safely because the Materia Melding list does not expose bag/slot identity.
 
 ## Build and install

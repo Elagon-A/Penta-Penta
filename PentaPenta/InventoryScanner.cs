@@ -48,6 +48,9 @@ internal sealed class InventoryScanner(Services services)
             new("Critical Hit", counts.GetValueOrDefault(41772u), counts.GetValueOrDefault(41759u)),
             new("Direct Hit", counts.GetValueOrDefault(41771u), counts.GetValueOrDefault(41758u)),
             new("Determination", counts.GetValueOrDefault(41773u), counts.GetValueOrDefault(41760u)),
+            new("Craftsmanship", counts.GetValueOrDefault(41778u), counts.GetValueOrDefault(41765u)),
+            new("Control", counts.GetValueOrDefault(41780u), counts.GetValueOrDefault(41767u)),
+            new("CP", counts.GetValueOrDefault(41779u), counts.GetValueOrDefault(41766u)),
         ];
     }
 }

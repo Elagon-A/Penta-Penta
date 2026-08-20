@@ -9,6 +9,11 @@ namespace PentaPenta;
 
 internal sealed class MainWindow : Window
 {
+    private static readonly string[] CraftingMateriaLabels =
+    [
+        "Not set", "Craftsmanship XII", "Craftsmanship XI", "Control XII",
+        "Control XI", "CP XII", "CP XI",
+    ];
     private readonly Services services;
     private readonly Configuration config;
     private readonly InventoryScanner scanner;
@@ -21,7 +26,7 @@ internal sealed class MainWindow : Window
     private bool armFullRun;
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller)
-        : base("PentaPenta###PentaPentaMain", ImGuiWindowFlags.NoScrollbar)
+        : base("PentaPenta###PentaPentaMain")
     {
         this.services = services; this.config = config; this.scanner = scanner; this.controller = controller;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 500), MaximumSize = new Vector2(float.MaxValue) };
@@ -55,6 +60,8 @@ internal sealed class MainWindow : Window
             }
             ImGui.EndTable();
         }
+
+        DrawExactItemPresetEditor();
 
         ImGui.TextUnformatted("Materia inventory");
         ImGui.SameLine();
@@ -140,6 +147,35 @@ internal sealed class MainWindow : Window
         if (DateTime.UtcNow < nextMateriaStockRefresh) return;
         materiaStock = scanner.ScanMateriaStock();
         nextMateriaStockRefresh = DateTime.UtcNow.AddMilliseconds(250);
+    }
+    private void DrawExactItemPresetEditor()
+    {
+        var selectedItems = gear.Where(x => selected.Contains(Key(x))).ToList();
+        if (selectedItems.Count != 1) return;
+        var item = selectedItems[0];
+        var enabled = config.CraftingPresets.ContainsKey(item.ItemId);
+        if (ImGui.Checkbox($"Use exact crafting preset for {item.Name}", ref enabled))
+        {
+            if (enabled) config.CraftingPresets[item.ItemId] = new CraftingMeldPreset();
+            else config.CraftingPresets.Remove(item.ItemId);
+            services.PluginInterface.SavePluginConfig(config);
+        }
+        if (!enabled || !config.CraftingPresets.TryGetValue(item.ItemId, out var preset)) return;
+
+        while (preset.Slots.Count < 5) preset.Slots.Add(CraftingMateria.None);
+        for (var i = 0; i < 5; i++)
+        {
+            ImGui.PushID($"craft-preset-{i}");
+            ImGui.SetNextItemWidth(210);
+            var value = (int)preset.Slots[i];
+            if (ImGui.Combo($"Slot {i + 1}", ref value, CraftingMateriaLabels, CraftingMateriaLabels.Length))
+            {
+                preset.Slots[i] = (CraftingMateria)value;
+                services.PluginInterface.SavePluginConfig(config);
+            }
+            ImGui.PopID();
+        }
+        ImGui.TextDisabled("This exact slot plan replaces combat-stat priority for this item type.");
     }
     private static void DrawStockCount(int count)
     {

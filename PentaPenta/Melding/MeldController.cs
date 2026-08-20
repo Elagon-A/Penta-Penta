@@ -51,6 +51,8 @@ internal sealed class MeldController : IDisposable
     private int autoCandidateIndex;
     private int autoItemIndex;
     private string autoMateriaName = "";
+    private int autoExpectedGain;
+    private bool autoUsingExactPreset;
     private int autoRetries;
     private int autoTotalMelds;
     private int autoCompletedMelds;
@@ -108,6 +110,20 @@ internal sealed class MeldController : IDisposable
         if (unsupported is not null) { Fail($"{unsupported.Name} cannot be overmelded; remove it from the queue."); return; }
         var liveMeldCounts = items.Select(CurrentMeldCount).ToArray();
         if (liveMeldCounts.Any(x => x < 0)) { Fail("A queued inventory slot no longer contains the expected item."); return; }
+        for (var itemIndex = 0; itemIndex < items.Count; itemIndex++)
+        {
+            var queuedItem = items[itemIndex];
+            if (!config.CraftingPresets.TryGetValue(queuedItem.ItemId, out var preset)) continue;
+            if (preset.Slots.Count < 5 || preset.Slots.Take(5).Any(x => x == CraftingMateria.None))
+            { Fail($"The exact crafting preset for {queuedItem.Name} must define all five slots."); return; }
+            for (var slotIndex = 0; slotIndex < 5; slotIndex++)
+            {
+                var planned = MeldPlan.Resolve(preset.Slots[slotIndex]);
+                if (planned is null) { Fail($"Slot {slotIndex + 1} has an invalid crafting preset choice."); return; }
+                if (planned.Grade == 12 && slotIndex + 1 > queuedItem.MateriaSlotCount + 1)
+                { Fail($"{queuedItem.Name} slot {slotIndex + 1} cannot use grade XII materia."); return; }
+            }
+        }
         autoItemIndex = Array.FindIndex(liveMeldCounts, x => x < 5);
         if (autoItemIndex < 0) { Fail("Every queued item is already fully melded."); return; }
         if (services.GameGui.GetAddonByName("MateriaAttach").IsNull)
@@ -339,6 +355,33 @@ internal sealed class MeldController : IDisposable
             {
                 var slot = currentMelds + 1;
                 var grade = MeldPlan.GradeForSlot(slot, expected.MateriaSlotCount);
+                if (config.CraftingPresets.TryGetValue(expected.ItemId, out var preset))
+                {
+                    var planned = preset.Slots.Count >= slot ? MeldPlan.Resolve(preset.Slots[slot - 1]) : null;
+                    if (planned is null)
+                    { StopAutomaticWithError($"No exact crafting materia is configured for {expected.Name} slot {slot}."); return; }
+                    autoUsingExactPreset = true;
+                    autoMateriaName = planned.Name;
+                    pendingMateriaId = planned.ItemId;
+                    autoExpectedGain = planned.Gain;
+                    if (CountItem(pendingMateriaId) <= 0)
+                    { StopAutomaticWithError($"No {autoMateriaName} remains for {expected.Name} slot {slot}."); return; }
+
+                    var presetMain = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttach");
+                    if (presetMain == null || !presetMain->IsReady) return;
+                    var presetRows = FindExactStringRows(presetMain, 429, autoMateriaName);
+                    if (presetRows.Count != 1)
+                    { StopAutomaticWithError($"Could not uniquely locate {autoMateriaName} in Materia Melding."); return; }
+                    FireInts(presetMain, 2, presetRows[0] - 429, 1, 0);
+                    services.Log.Information("Auto exact preset: row {Row}, materia {Materia}", presetRows[0] - 429, autoMateriaName);
+                    autoPhase = AutoPhase.WaitDetail;
+                    autoNextAction = DateTime.UtcNow.AddMilliseconds(200);
+                    autoDeadline = DateTime.UtcNow.AddSeconds(8);
+                    Status = $"Checking exact preset {autoMateriaName} for slot {slot}...";
+                    break;
+                }
+
+                autoUsingExactPreset = false;
                 while (autoCandidateIndex < MeldPlan.Priority.Length
                     && autoRejectedChoices.Contains((autoItemIndex, grade, autoCandidateIndex)))
                 {
@@ -352,6 +395,7 @@ internal sealed class MeldController : IDisposable
                 var choice = MeldPlan.Priority[autoCandidateIndex];
                 autoMateriaName = MateriaName(choice.Stat, grade);
                 pendingMateriaId = grade == 12 ? choice.Grade12ItemId : choice.Grade11ItemId;
+                autoExpectedGain = grade == 12 ? choice.Grade12Gain : choice.Grade11Gain;
                 if (CountItem(pendingMateriaId) <= 0)
                 { autoCandidateIndex++; return; }
 
@@ -374,17 +418,20 @@ internal sealed class MeldController : IDisposable
                 var foundMateria = AtkString(detail, 9);
                 var gain = AtkString(detail, 10);
                 var foundItem = AtkString(detail, 16);
-                var grade = MeldPlan.GradeForSlot(currentMelds + 1, expected.MateriaSlotCount);
-                var choice = MeldPlan.Priority[autoCandidateIndex];
-                var expectedGain = grade == 12 ? choice.Grade12Gain : choice.Grade11Gain;
                 if (foundMateria != autoMateriaName || !foundItem.StartsWith(expected.Name, StringComparison.Ordinal))
                 { StopAutomaticWithError("Materia detail identity mismatch; no meld was sent."); return; }
-                if (!gain.Contains($"+{expectedGain}", StringComparison.Ordinal))
+                if (!gain.Contains($"+{autoExpectedGain}", StringComparison.Ordinal))
                 {
                     FireInts(detail, 1, 0, 0);
                     services.Log.Information(
                         "Auto rejected {Materia}: displayed gain {Gain}, expected +{ExpectedGain}; reselecting equipment before fallback",
-                        autoMateriaName, gain, expectedGain);
+                        autoMateriaName, gain, autoExpectedGain);
+                    if (autoUsingExactPreset)
+                    {
+                        StopAutomaticWithError($"Exact preset rejected {autoMateriaName} for slot {currentMelds + 1}: displayed {gain}, expected +{autoExpectedGain}.");
+                        return;
+                    }
+                    var grade = MeldPlan.GradeForSlot(currentMelds + 1, expected.MateriaSlotCount);
                     autoRejectedChoices.Add((autoItemIndex, grade, autoCandidateIndex));
                     if (gain.Contains("+0", StringComparison.Ordinal))
                     {
