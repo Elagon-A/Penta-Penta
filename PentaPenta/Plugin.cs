@@ -32,7 +32,7 @@ public sealed class Plugin : IDalamudPlugin
         var scanner = new InventoryScanner(services);
         controller = new Melding.MeldController(services, config);
         main = new MainWindow(services, config, scanner, controller);
-        marketBoardOverlay = new MarketBoardOverlay(services, scanner);
+        marketBoardOverlay = new MarketBoardOverlay(services, config, scanner);
         windows.AddWindow(main);
         windows.AddWindow(marketBoardOverlay);
         services.Commands.AddHandler("/pentapenta", new CommandInfo((_, _) => main.Toggle()) { HelpMessage = "Open PentaPenta." });

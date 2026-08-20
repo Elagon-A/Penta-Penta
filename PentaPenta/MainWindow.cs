@@ -63,6 +63,14 @@ internal sealed class MainWindow : Window
 
         DrawExactItemPresetEditor();
 
+        var enableMarketOverlay = config.EnableMarketBoardOverlay;
+        if (ImGui.Checkbox("Enable marketboard materia overlay", ref enableMarketOverlay))
+        {
+            config.EnableMarketBoardOverlay = enableMarketOverlay;
+            services.PluginInterface.SavePluginConfig(config);
+        }
+        ImGui.TextDisabled("Shows the clickable materia shopping list when you approach a marketboard.");
+
         ImGui.TextUnformatted("Materia inventory");
         ImGui.SameLine();
         ImGui.TextDisabled("live · low-stock warning below 25");

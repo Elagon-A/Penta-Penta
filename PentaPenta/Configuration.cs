@@ -8,6 +8,7 @@ public sealed class Configuration : IPluginConfiguration
     public int Version { get; set; } = 2;
     public bool StrictNoOvercap { get; set; } = true;
     public float UiCooldownSeconds { get; set; } = 2.5f;
+    public bool EnableMarketBoardOverlay { get; set; } = true;
     public List<QueuedItem> Queue { get; set; } = [];
     public Dictionary<uint, CraftingMeldPreset> CraftingPresets { get; set; } = [];
 }

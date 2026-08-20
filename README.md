@@ -12,6 +12,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - A stalled queue automatically reconciles the live item state and retries safely up to three times before stopping for inspection.
 - Exact crafting presets can be disabled temporarily without erasing their saved five-slot plan.
 - A nearby-marketboard overlay shows grade XI/XII battle and crafting materia stock and opens a clicked materia's native market listings.
+- The nearby-marketboard overlay can be enabled or disabled from PentaPenta's main window, and the setting is saved.
 - Fresh and partially completed items can be queued; completed items are skipped after live 5/5 verification.
 - Live grade XI/XII materia inventory counts update during a run and highlight low or empty stock.
 - Eligible inventory gear has a **Pentameld** context-menu action that opens PentaPenta with the exact bag/slot selected.
