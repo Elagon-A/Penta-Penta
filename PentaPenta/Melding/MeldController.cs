@@ -167,8 +167,8 @@ internal sealed class MeldController : IDisposable
         if (State != RunState.Ready || items.Count == 0) return;
 
         var slot = items[0].MeldCount + 1;
-        if (slot > 2)
-        { Fail("One-shot test is restricted to guaranteed slots 1–2."); return; }
+        if (slot > items[0].MateriaSlotCount)
+        { Fail("One-shot test is restricted to the item's native guaranteed slots."); return; }
 
         var addon = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttachDialog");
         if (addon == null || !addon->IsReady)
@@ -193,8 +193,8 @@ internal sealed class MeldController : IDisposable
         if (State != RunState.Ready || items.Count == 0) return;
 
         var slot = items[0].MeldCount + 1;
-        if (slot < 3 || slot > 5)
-        { Fail("Advanced test is restricted to overmeld slots 3–5."); return; }
+        if (slot <= items[0].MateriaSlotCount || slot > 5)
+        { Fail("Advanced test is restricted to slots beyond the item's native materia slots."); return; }
 
         var addon = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttachDialog");
         if (addon == null || !addon->IsReady)
@@ -385,7 +385,7 @@ internal sealed class MeldController : IDisposable
                 startingMeldCount = currentMelds;
                 autoRetries = 0;
                 startingMateriaCount = CountItem(pendingMateriaId);
-                if (currentMelds < 2)
+                if (currentMelds < expected.MateriaSlotCount)
                 {
                     FireInts(detail, 0, 0, 0);
                     autoPhase = AutoPhase.Monitoring;
