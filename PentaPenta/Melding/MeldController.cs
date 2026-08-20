@@ -57,6 +57,7 @@ internal sealed class MeldController : IDisposable
     private int autoMateriaConsumed;
     private DateTime autoStartedAt;
     private DateTime autoFinishedAt;
+    private readonly HashSet<(int ItemIndex, int Grade, int CandidateIndex)> autoRejectedChoices = [];
 
     public MeldController(Services services, Configuration config)
     {
@@ -74,6 +75,7 @@ internal sealed class MeldController : IDisposable
         autoMateriaConsumed = 0;
         autoStartedAt = default;
         autoFinishedAt = default;
+        autoRejectedChoices.Clear();
         State = items.Count == 0 ? RunState.Idle : RunState.WaitingForMeldingWindow;
         Status = items.Count == 0 ? "Select at least one item." : "Open Materia Melding, then press Start.";
     }
@@ -118,6 +120,7 @@ internal sealed class MeldController : IDisposable
         autoMateriaConsumed = 0;
         autoStartedAt = DateTime.UtcNow;
         autoFinishedAt = default;
+        autoRejectedChoices.Clear();
         autoPhase = AutoPhase.SelectEquipment;
         autoNextAction = DateTime.UtcNow;
         autoDeadline = DateTime.UtcNow.AddSeconds(15);
@@ -336,6 +339,14 @@ internal sealed class MeldController : IDisposable
             {
                 var slot = currentMelds + 1;
                 var grade = MeldPlan.GradeForSlot(slot, expected.MateriaSlotCount);
+                while (autoCandidateIndex < MeldPlan.Priority.Length
+                    && autoRejectedChoices.Contains((autoItemIndex, grade, autoCandidateIndex)))
+                {
+                    services.Log.Information(
+                        "Auto skipping cached overcap choice {Choice} grade {Grade} for {Item}",
+                        MeldPlan.Priority[autoCandidateIndex].Stat, grade, expected.Name);
+                    autoCandidateIndex++;
+                }
                 if (autoCandidateIndex >= MeldPlan.Priority.Length)
                 { StopAutomaticWithError($"No priority materia fits slot {slot} without overcapping."); return; }
                 var choice = MeldPlan.Priority[autoCandidateIndex];
@@ -374,6 +385,12 @@ internal sealed class MeldController : IDisposable
                     services.Log.Information(
                         "Auto rejected {Materia}: displayed gain {Gain}, expected +{ExpectedGain}; reselecting equipment before fallback",
                         autoMateriaName, gain, expectedGain);
+                    autoRejectedChoices.Add((autoItemIndex, grade, autoCandidateIndex));
+                    if (gain.Contains("+0", StringComparison.Ordinal))
+                    {
+                        autoRejectedChoices.Add((autoItemIndex, 11, autoCandidateIndex));
+                        autoRejectedChoices.Add((autoItemIndex, 12, autoCandidateIndex));
+                    }
                     autoCandidateIndex++;
                     autoPhase = AutoPhase.SelectEquipment;
                     autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);

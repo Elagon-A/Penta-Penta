@@ -13,6 +13,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - Live grade XI/XII materia inventory counts update during a run and highlight low or empty stock.
 - Eligible inventory gear has a **Pentameld** context-menu action that opens PentaPenta with the exact bag/slot selected.
 - Preparing a queue opens the Materia Melding window automatically when it is available.
+- Overcap rejections are cached per item and grade during a queue so later slots skip choices already proven not to fit.
 - Duplicate visible equipment names stop safely because the Materia Melding list does not expose bag/slot identity.
 
 ## Build and install
