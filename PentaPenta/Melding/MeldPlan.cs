@@ -13,5 +13,8 @@ internal static class MeldPlan
         new(MeldStat.Determination, 41760, 41773, 18, 54),
     ];
 
-    public static int GradeForSlot(int slot) => slot <= 3 ? 12 : 11;
+    // Current-grade materia can be used in every native slot plus the first
+    // advanced slot. Later advanced slots require the previous grade.
+    public static int GradeForSlot(int slot, int nativeMateriaSlots) =>
+        slot <= nativeMateriaSlots + 1 ? 12 : 11;
 }

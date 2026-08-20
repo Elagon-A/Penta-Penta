@@ -2,7 +2,8 @@ using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using FFXIVClientStructs.FFXIV.Client.Game;
+using Lumina.Excel.Sheets;
 using PentaPenta.Models;
 
 namespace PentaPenta.Melding;
@@ -86,11 +87,12 @@ internal sealed class MeldController : IDisposable
         if (!services.GameGui.GetAddonByName("MateriaAttach").IsNull)
         { Status = $"Queue prepared with {items.Count} item(s). Arm and start when ready."; return; }
 
-        var agent = AgentMateriaAttach.Instance();
-        if (agent == null || !agent->IsActivatable())
-        { Fail("Materia Melding is not currently available. Check your location and crafting job access."); return; }
+        var action = services.Data.GetExcelSheet<GeneralAction>()
+            .FirstOrDefault(x => x.Name.ExtractText() is "Advanced Materia Melding" or "Materia Melding");
+        var actionManager = ActionManager.Instance();
+        if (action.RowId == 0 || actionManager == null || !actionManager->UseAction(ActionType.GeneralAction, action.RowId))
+        { Fail("Materia Melding could not be opened. Check that the action is unlocked and currently available."); return; }
 
-        agent->Show();
         State = RunState.WaitingForMeldingWindow;
         Status = $"Queue prepared with {items.Count} item(s); opening Materia Melding...";
     }
@@ -140,7 +142,7 @@ internal sealed class MeldController : IDisposable
         { Fail($"Selected item mismatch: expected {expectedItem.Name}, found {equipmentName}."); return; }
 
         var slot = expectedItem.MeldCount + 1;
-        var expectedGrade = MeldPlan.GradeForSlot(slot);
+        var expectedGrade = MeldPlan.GradeForSlot(slot, expectedItem.MateriaSlotCount);
         var choice = MeldPlan.Priority.FirstOrDefault(x => materiaName.Contains(x.Stat switch
         {
             MeldStat.CriticalHit => "Savage Aim",
@@ -333,7 +335,7 @@ internal sealed class MeldController : IDisposable
             case AutoPhase.ChooseCandidate:
             {
                 var slot = currentMelds + 1;
-                var grade = MeldPlan.GradeForSlot(slot);
+                var grade = MeldPlan.GradeForSlot(slot, expected.MateriaSlotCount);
                 if (autoCandidateIndex >= MeldPlan.Priority.Length)
                 { StopAutomaticWithError($"No priority materia fits slot {slot} without overcapping."); return; }
                 var choice = MeldPlan.Priority[autoCandidateIndex];
@@ -361,7 +363,7 @@ internal sealed class MeldController : IDisposable
                 var foundMateria = AtkString(detail, 9);
                 var gain = AtkString(detail, 10);
                 var foundItem = AtkString(detail, 16);
-                var grade = MeldPlan.GradeForSlot(currentMelds + 1);
+                var grade = MeldPlan.GradeForSlot(currentMelds + 1, expected.MateriaSlotCount);
                 var choice = MeldPlan.Priority[autoCandidateIndex];
                 var expectedGain = grade == 12 ? choice.Grade12Gain : choice.Grade11Gain;
                 if (foundMateria != autoMateriaName || !foundItem.StartsWith(expected.Name, StringComparison.Ordinal))

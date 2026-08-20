@@ -7,7 +7,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - Inventory picker distinguishes duplicate items by container and slot.
 - Queue persists across reloads and processes distinct-name items sequentially.
 - Default plan is Critical Hit → Direct Hit → Determination.
-- Slots 1–3 use grade XII; slots 4–5 use grade XI.
+- Grade XII is used for an item's native slots plus its first overmeld; later slots use grade XI. This means XII in slots 1–3 for normal two-slot gear and slots 1–2 for one-slot accessories.
 - Strict no-overcap, inventory identity, combat, login, window, timeout, and materia-quantity gates are enforced.
 - Fresh and partially completed items can be queued; completed items are skipped after live 5/5 verification.
 - Live grade XI/XII materia inventory counts update during a run and highlight low or empty stock.

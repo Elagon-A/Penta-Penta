@@ -76,7 +76,7 @@ internal sealed class MainWindow : Window
         }
 
         ImGui.Text("Plan: Critical Hit  >  Direct Hit  >  Determination");
-        ImGui.TextDisabled("Slots 1–3: grade XII   |   Slots 4–5: grade XI   |   strict no-overcap");
+        ImGui.TextDisabled("Grade XII: native slots + first overmeld   |   later slots: grade XI   |   strict no-overcap");
         ImGui.Separator();
         ImGui.TextWrapped($"Status: {controller.Status}");
         if (controller.IsQueueRunning || controller.TotalMelds > 0)
