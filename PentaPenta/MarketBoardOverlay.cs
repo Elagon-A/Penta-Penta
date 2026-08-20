@@ -14,14 +14,17 @@ namespace PentaPenta;
 internal sealed class MarketBoardOverlay : Window, IDisposable
 {
     private const uint MarketBoardDataId = 2000442;
-    private static readonly MarketMateria[] Materia =
+    private static readonly MarketMateriaRow[] BattleMateria =
     [
-        new("Critical Hit", 12, 41772), new("Critical Hit", 11, 41759),
-        new("Direct Hit", 12, 41771), new("Direct Hit", 11, 41758),
-        new("Determination", 12, 41773), new("Determination", 11, 41760),
-        new("Craftsmanship", 12, 41778), new("Craftsmanship", 11, 41765),
-        new("Control", 12, 41780), new("Control", 11, 41767),
-        new("CP", 12, 41779), new("CP", 11, 41766),
+        new("Critical Hit", 41772, 41759),
+        new("Direct Hit", 41771, 41758),
+        new("Determination", 41773, 41760),
+    ];
+    private static readonly MarketMateriaRow[] CraftingMateria =
+    [
+        new("Craftsmanship", 41778, 41765),
+        new("Control", 41780, 41767),
+        new("CP", 41779, 41766),
     ];
 
     private readonly Services services;
@@ -44,8 +47,8 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         this.scanner = scanner;
         SizeConstraints = new WindowSizeConstraints
         {
-            MinimumSize = new Vector2(440, 360),
-            MaximumSize = new Vector2(700, 700),
+            MinimumSize = new Vector2(360, 300),
+            MaximumSize = new Vector2(560, 520),
         };
         IsOpen = false;
         services.Framework.Update += OnFrameworkUpdate;
@@ -57,41 +60,55 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     public override void Draw()
     {
         RefreshStockIfDue();
-        ImGui.TextWrapped("Materia shopping list — click an item to open its marketboard listings.");
-        ImGui.TextDisabled("The game still requires you to choose and confirm each purchase.");
+        ImGui.TextUnformatted("Click a quantity to view listings.");
+        DrawMateriaSection("Battle", BattleMateria);
+        DrawMateriaSection("Crafting", CraftingMateria);
         ImGui.Separator();
-
-        if (ImGui.BeginTable("market-materia", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH))
-        {
-            ImGui.TableSetupColumn("Materia");
-            ImGui.TableSetupColumn("Grade", ImGuiTableColumnFlags.WidthFixed, 65);
-            ImGui.TableSetupColumn("In bags", ImGuiTableColumnFlags.WidthFixed, 75);
-            ImGui.TableHeadersRow();
-            foreach (var materia in Materia)
-            {
-                ImGui.PushID((int)materia.ItemId);
-                ImGui.TableNextRow();
-                ImGui.TableNextColumn();
-                if (ImGui.Selectable(materia.Stat, false, ImGuiSelectableFlags.SpanAllColumns))
-                    QueueListing(materia);
-                ImGui.TableNextColumn(); ImGui.TextUnformatted(materia.Grade == 12 ? "XII" : "XI");
-                ImGui.TableNextColumn(); DrawStock(stock.GetValueOrDefault(materia.ItemId));
-                ImGui.PopID();
-            }
-            ImGui.EndTable();
-        }
-        ImGui.Separator();
-        ImGui.TextWrapped(status);
+        ImGui.TextDisabled(status);
     }
 
-    private unsafe void QueueListing(MarketMateria materia)
+    private void DrawMateriaSection(string title, IReadOnlyList<MarketMateriaRow> rows)
     {
-        pendingItemId = materia.ItemId;
-        pendingItemName = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
-            .GetRowOrDefault(materia.ItemId)?.Name.ExtractText() ?? "";
+        ImGui.Spacing();
+        ImGui.TextUnformatted(title);
+        if (!ImGui.BeginTable($"market-{title}", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH)) return;
+        ImGui.TableSetupColumn("Materia");
+        ImGui.TableSetupColumn("XII", ImGuiTableColumnFlags.WidthFixed, 90);
+        ImGui.TableSetupColumn("XI", ImGuiTableColumnFlags.WidthFixed, 90);
+        ImGui.TableHeadersRow();
+        foreach (var row in rows)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn(); ImGui.TextUnformatted(row.Stat);
+            ImGui.TableNextColumn(); DrawStockButton(row.Grade12ItemId);
+            ImGui.TableNextColumn(); DrawStockButton(row.Grade11ItemId);
+        }
+        ImGui.EndTable();
+    }
+
+    private void DrawStockButton(uint itemId)
+    {
+        var count = stock.GetValueOrDefault(itemId);
+        var color = StockColor(count);
+        ImGui.PushStyleColor(ImGuiCol.Text, color);
+        ImGui.PushID((int)itemId);
+        if (ImGui.Button(count.ToString("N0"), new Vector2(-1, 0))) QueueListing(itemId);
+        if (ImGui.IsItemHovered())
+        {
+            var name = ResolveItemName(itemId);
+            ImGui.SetTooltip($"Open {name} listings");
+        }
+        ImGui.PopID();
+        ImGui.PopStyleColor();
+    }
+
+    private unsafe void QueueListing(uint itemId)
+    {
+        pendingItemId = itemId;
+        pendingItemName = ResolveItemName(itemId);
         if (pendingItemName.Length == 0)
         {
-            CancelPending($"Could not resolve materia item {materia.ItemId}.");
+            CancelPending($"Could not resolve materia item {itemId}.");
             return;
         }
         pendingDeadline = DateTime.UtcNow.AddSeconds(12);
@@ -99,6 +116,15 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         if (IsMarketSearchReady())
         {
             RunNativeSearch();
+            return;
+        }
+
+        // The addon can exist for several frames before its controls are ready.
+        // Wait for initialization instead of failing or interacting a second time.
+        if (!services.GameGui.GetAddonByName("ItemSearch").IsNull)
+        {
+            pendingPhase = PendingPhase.OpeningBoard;
+            status = $"Waiting for the marketboard to finish opening for {pendingItemName}...";
             return;
         }
 
@@ -198,8 +224,12 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         }
     }
 
-    private bool IsMarketSearchReady()
-        => !services.GameGui.GetAddonByName("ItemSearch").IsNull;
+    private unsafe bool IsMarketSearchReady()
+    {
+        var addon = services.GameGui.GetAddonByName<AddonItemSearch>("ItemSearch");
+        return addon != null && addon->IsReady
+            && addon->SearchTextInput != null && addon->ResultsList != null;
+    }
 
     private IGameObject? FindNearbyMarketBoard()
     {
@@ -215,17 +245,18 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     private void RefreshStockIfDue()
     {
         if (DateTime.UtcNow < nextStockRefresh) return;
-        stock = scanner.ScanItemCounts(Materia.Select(x => x.ItemId));
+        stock = scanner.ScanItemCounts(BattleMateria.Concat(CraftingMateria)
+            .SelectMany(x => new[] { x.Grade12ItemId, x.Grade11ItemId }));
         nextStockRefresh = DateTime.UtcNow.AddMilliseconds(500);
     }
 
-    private static void DrawStock(int count)
-    {
-        var color = count == 0 ? new Vector4(1f, .3f, .3f, 1f)
+    private static Vector4 StockColor(int count)
+        => count == 0 ? new Vector4(1f, .3f, .3f, 1f)
             : count < 25 ? new Vector4(1f, .75f, .25f, 1f)
             : new Vector4(.65f, 1f, .65f, 1f);
-        ImGui.TextColored(color, count.ToString("N0"));
-    }
+
+    private string ResolveItemName(uint itemId) => services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
+        .GetRowOrDefault(itemId)?.Name.ExtractText() ?? "";
 
     private void CancelPending(string message)
     {
@@ -237,6 +268,6 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
 
     public void Dispose() => services.Framework.Update -= OnFrameworkUpdate;
 
-    private sealed record MarketMateria(string Stat, int Grade, uint ItemId);
+    private sealed record MarketMateriaRow(string Stat, uint Grade12ItemId, uint Grade11ItemId);
     private enum PendingPhase { None, OpeningBoard, WaitingForSearchResults, WaitingForListings }
 }

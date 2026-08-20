@@ -14,6 +14,9 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - Exact crafting presets allow a positive partial stat gain when the selected materia intentionally reaches an item's cap; zero-gain melds are still rejected.
 - A nearby-marketboard overlay shows grade XI/XII battle and crafting materia stock and opens a clicked materia's native market listings.
 - The nearby-marketboard overlay can be enabled or disabled from PentaPenta's main window, and the setting is saved.
+- One-click market searches wait for the native marketboard controls to finish initializing before entering and selecting the requested materia.
+- The shopping overlay uses compact Battle/Crafting tables where the live XI/XII inventory quantities are the listing buttons.
+- A complete exact crafting preset can be copied, then applied as independent saved presets to every checked queue item type.
 - Fresh and partially completed items can be queued; completed items are skipped after live 5/5 verification.
 - Live grade XI/XII materia inventory counts update during a run and highlight low or empty stock.
 - Eligible inventory gear has a **Pentameld** context-menu action that opens PentaPenta with the exact bag/slot selected.

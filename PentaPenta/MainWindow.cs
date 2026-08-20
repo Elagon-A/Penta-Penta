@@ -24,6 +24,9 @@ internal sealed class MainWindow : Window
     private DateTime nextMateriaStockRefresh;
     private string filter = "";
     private bool armFullRun;
+    private CraftingMeldPreset? copiedCraftingPreset;
+    private string copiedCraftingPresetSource = "";
+    private string presetCopyStatus = "";
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller)
         : base("PentaPenta###PentaPentaMain")
@@ -159,6 +162,26 @@ internal sealed class MainWindow : Window
     private void DrawExactItemPresetEditor()
     {
         var selectedItems = gear.Where(x => selected.Contains(Key(x))).ToList();
+        if (copiedCraftingPreset is not null && selectedItems.Count > 0)
+        {
+            var targetTypes = selectedItems.Select(x => x.ItemId).Distinct().ToList();
+            ImGui.TextDisabled($"Copied preset: {copiedCraftingPresetSource}");
+            if (ImGui.Button($"Apply copied preset to {targetTypes.Count} checked item type(s)"))
+            {
+                foreach (var itemId in targetTypes)
+                    config.CraftingPresets[itemId] = ClonePreset(copiedCraftingPreset, enabled: true);
+                services.PluginInterface.SavePluginConfig(config);
+                presetCopyStatus = $"Applied {copiedCraftingPresetSource} preset to {targetTypes.Count} checked item type(s).";
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Clear copied preset"))
+            {
+                copiedCraftingPreset = null;
+                copiedCraftingPresetSource = "";
+            }
+            if (presetCopyStatus.Length > 0) ImGui.TextDisabled(presetCopyStatus);
+            ImGui.Separator();
+        }
         if (selectedItems.Count != 1) return;
         var item = selectedItems[0];
         config.CraftingPresets.TryGetValue(item.ItemId, out var preset);
@@ -191,8 +214,27 @@ internal sealed class MainWindow : Window
             }
             ImGui.PopID();
         }
+        var presetComplete = preset.Slots.Take(5).All(x => x != CraftingMateria.None);
+        if (!presetComplete) ImGui.BeginDisabled();
+        if (ImGui.Button("Copy this preset"))
+        {
+            copiedCraftingPreset = ClonePreset(preset, enabled: true);
+            copiedCraftingPresetSource = item.Name;
+            presetCopyStatus = $"Copied {item.Name}. Check the target items, then apply it.";
+        }
+        if (!presetComplete) ImGui.EndDisabled();
+        if (!presetComplete)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled("Set all five slots before copying.");
+        }
         ImGui.TextDisabled("This exact slot plan replaces combat-stat priority for this item type.");
     }
+    private static CraftingMeldPreset ClonePreset(CraftingMeldPreset source, bool enabled) => new()
+    {
+        Enabled = enabled,
+        Slots = source.Slots.Take(5).Concat(Enumerable.Repeat(CraftingMateria.None, 5)).Take(5).ToList(),
+    };
     private static void DrawStockCount(int count)
     {
         var color = count == 0
