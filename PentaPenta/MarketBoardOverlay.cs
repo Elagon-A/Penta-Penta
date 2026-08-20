@@ -197,8 +197,27 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
             return;
         }
 
-        addon->SetModeFilter(AddonItemSearch.SearchMode.Normal, 0);
-        addon->SetFocusNode((AtkResNode*)((AtkComponentBase*)addon->SearchTextInput)->OwnerNode, true, 0);
+        var inputBase = (AtkComponentBase*)addon->SearchTextInput;
+        var inputNode = inputBase->OwnerNode;
+        if (inputNode == null)
+        {
+            CancelPending("The native market search field had no input node.");
+            return;
+        }
+
+        // Reproduce the field's real mouse-click event. This switches Item Search
+        // out of the selected category (for example Gladiator's Arms) and into
+        // text/partial-match mode, which is what enables the Search button.
+        var clickEvent = (AtkEvent*)inputNode->AtkResNode.AtkEventManager.Event;
+        while (clickEvent != null && clickEvent->State.EventType != AtkEventType.MouseClick)
+            clickEvent = clickEvent->NextEvent;
+        if (clickEvent == null)
+        {
+            CancelPending("The native market search field had no click event.");
+            return;
+        }
+        addon->ReceiveEvent(clickEvent->State.EventType, (int)clickEvent->Param, clickEvent);
+        addon->SetFocusNode((AtkResNode*)inputNode, true, 0);
         addon->SearchTextInput->IsActive = true;
         addon->SearchTextInput->SetText(pendingItemName);
         addon->SearchText.SetString(pendingItemName);
@@ -212,8 +231,15 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     private unsafe void SubmitNativeSearch()
     {
         var addon = services.GameGui.GetAddonByName<AddonItemSearch>("ItemSearch");
-        if (addon == null || !addon->IsReady || addon->SearchTextInput == null || addon->ResultsList == null)
+        if (addon == null || !addon->IsReady || addon->SearchTextInput == null
+            || addon->SearchButton == null || addon->ResultsList == null)
             return;
+
+        if (!addon->SearchButton->IsEnabled)
+        {
+            status = $"Waiting for Search to enable for {pendingItemName}...";
+            return;
+        }
 
         addon->RunSearch(true);
         pendingPhase = PendingPhase.WaitingForSearchResults;
