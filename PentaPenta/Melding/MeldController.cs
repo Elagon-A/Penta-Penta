@@ -410,7 +410,11 @@ internal sealed class MeldController : IDisposable
                 var foundItem = AtkString(detail, 16);
                 if (foundMateria != autoMateriaName || !foundItem.StartsWith(expected.Name, StringComparison.Ordinal))
                 { StopAutomaticWithError("Materia detail identity mismatch; no meld was sent."); return; }
-                if (!gain.Contains($"+{autoExpectedGain}", StringComparison.Ordinal))
+                var hasDisplayedGain = TryParseDisplayedGain(gain, out var displayedGain);
+                var gainAccepted = autoUsingExactPreset
+                    ? hasDisplayedGain && displayedGain > 0 && displayedGain <= autoExpectedGain
+                    : hasDisplayedGain && displayedGain == autoExpectedGain;
+                if (!gainAccepted)
                 {
                     FireInts(detail, 1, 0, 0);
                     services.Log.Information(
@@ -435,6 +439,11 @@ internal sealed class MeldController : IDisposable
                     Status = $"{autoMateriaName} would overcap; trying the next priority.";
                     return;
                 }
+
+                if (autoUsingExactPreset && displayedGain < autoExpectedGain)
+                    services.Log.Information(
+                        "Exact preset accepts intentional partial gain for {Materia}: +{DisplayedGain} of +{ExpectedGain}",
+                        autoMateriaName, displayedGain, autoExpectedGain);
 
                 startingMeldCount = currentMelds;
                 startingMateriaCount = CountItem(pendingMateriaId);
@@ -591,6 +600,17 @@ internal sealed class MeldController : IDisposable
         if (index < 0 || index >= addon->AtkValuesCount) return "";
         var type = addon->AtkValues[index].Type.ToString();
         return type is "String" or "String8" ? addon->AtkValues[index].String.ExtractText().Trim() : "";
+    }
+
+    private static bool TryParseDisplayedGain(string text, out int gain)
+    {
+        gain = 0;
+        var plus = text.LastIndexOf('+');
+        if (plus < 0 || plus + 1 >= text.Length) return false;
+        var digits = text.AsSpan(plus + 1);
+        var length = 0;
+        while (length < digits.Length && char.IsDigit(digits[length])) length++;
+        return length > 0 && int.TryParse(digits[..length], out gain);
     }
 
     private static unsafe void FireInts(AtkUnitBase* addon, params int[] values)

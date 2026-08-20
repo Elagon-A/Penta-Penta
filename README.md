@@ -11,6 +11,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - Strict no-overcap, inventory identity, combat, login, window, timeout, and materia-quantity gates are enforced.
 - A stalled queue automatically reconciles the live item state and retries safely up to three times before stopping for inspection.
 - Exact crafting presets can be disabled temporarily without erasing their saved five-slot plan.
+- Exact crafting presets allow a positive partial stat gain when the selected materia intentionally reaches an item's cap; zero-gain melds are still rejected.
 - A nearby-marketboard overlay shows grade XI/XII battle and crafting materia stock and opens a clicked materia's native market listings.
 - The nearby-marketboard overlay can be enabled or disabled from PentaPenta's main window, and the setting is saved.
 - Fresh and partially completed items can be queued; completed items are skipped after live 5/5 verification.
