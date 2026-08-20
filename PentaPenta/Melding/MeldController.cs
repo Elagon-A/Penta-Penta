@@ -53,7 +53,7 @@ internal sealed class MeldController : IDisposable
     private string autoMateriaName = "";
     private int autoExpectedGain;
     private bool autoUsingExactPreset;
-    private int autoRetries;
+    private int autoRecoveryAttempts;
     private int autoTotalMelds;
     private int autoCompletedMelds;
     private int autoMateriaConsumed;
@@ -113,7 +113,7 @@ internal sealed class MeldController : IDisposable
         for (var itemIndex = 0; itemIndex < items.Count; itemIndex++)
         {
             var queuedItem = items[itemIndex];
-            if (!config.CraftingPresets.TryGetValue(queuedItem.ItemId, out var preset)) continue;
+            if (!config.CraftingPresets.TryGetValue(queuedItem.ItemId, out var preset) || !preset.Enabled) continue;
             if (preset.Slots.Count < 5 || preset.Slots.Take(5).Any(x => x == CraftingMateria.None))
             { Fail($"The exact crafting preset for {queuedItem.Name} must define all five slots."); return; }
             for (var slotIndex = 0; slotIndex < 5; slotIndex++)
@@ -130,7 +130,7 @@ internal sealed class MeldController : IDisposable
         { State = RunState.WaitingForMeldingWindow; Status = "Open the Materia Melding window."; return; }
 
         autoCandidateIndex = 0;
-        autoRetries = 0;
+        autoRecoveryAttempts = 0;
         autoTotalMelds = liveMeldCounts.Sum(x => Math.Max(0, 5 - x));
         autoCompletedMelds = 0;
         autoMateriaConsumed = 0;
@@ -286,17 +286,7 @@ internal sealed class MeldController : IDisposable
         if (DateTime.UtcNow < autoNextAction) return;
         if (DateTime.UtcNow > autoDeadline)
         {
-            if (autoPhase == AutoPhase.WaitDetail && autoRetries < 2)
-            {
-                autoRetries++;
-                services.Log.Warning("Materia detail did not open; retry {Retry}/2 after equipment reselection", autoRetries);
-                autoPhase = AutoPhase.SelectEquipment;
-                autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
-                autoDeadline = DateTime.UtcNow.AddSeconds(20);
-                Status = $"Materia UI cooldown retry {autoRetries}/2...";
-                return;
-            }
-            StopAutomaticWithError($"Automatic run timed out in phase {autoPhase}; inspect the item before continuing.");
+            RecoverAutomaticTimeout();
             return;
         }
 
@@ -326,7 +316,7 @@ internal sealed class MeldController : IDisposable
             }
 
             autoCandidateIndex = 0;
-            autoRetries = 0;
+            autoRecoveryAttempts = 0;
             autoPhase = AutoPhase.SelectEquipment;
             autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
             autoDeadline = DateTime.UtcNow.AddSeconds(20);
@@ -355,7 +345,7 @@ internal sealed class MeldController : IDisposable
             {
                 var slot = currentMelds + 1;
                 var grade = MeldPlan.GradeForSlot(slot, expected.MateriaSlotCount);
-                if (config.CraftingPresets.TryGetValue(expected.ItemId, out var preset))
+                if (config.CraftingPresets.TryGetValue(expected.ItemId, out var preset) && preset.Enabled)
                 {
                     var planned = preset.Slots.Count >= slot ? MeldPlan.Resolve(preset.Slots[slot - 1]) : null;
                     if (planned is null)
@@ -447,7 +437,6 @@ internal sealed class MeldController : IDisposable
                 }
 
                 startingMeldCount = currentMelds;
-                autoRetries = 0;
                 startingMateriaCount = CountItem(pendingMateriaId);
                 if (currentMelds < expected.MateriaSlotCount)
                 {
@@ -480,13 +469,7 @@ internal sealed class MeldController : IDisposable
                 var count = CountItem(pendingMateriaId);
                 if (currentMelds > startingMeldCount)
                 {
-                    var used = Math.Max(0, startingMateriaCount - count);
-                    autoCompletedMelds += currentMelds - startingMeldCount;
-                    autoMateriaConsumed += used;
-                    Status = $"Slot {currentMelds} succeeded with {autoMateriaName}; {used} consumed.";
-                    autoPhase = AutoPhase.WaitReturn;
-                    autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
-                    autoDeadline = DateTime.UtcNow.AddSeconds(20);
+                    RecordObservedSuccess(currentMelds, count);
                 }
                 else if (count <= 0)
                     StopAutomaticWithError("Materia reached zero before success; inspect the item.");
@@ -509,6 +492,82 @@ internal sealed class MeldController : IDisposable
                 break;
             }
         }
+    }
+
+    private unsafe void RecoverAutomaticTimeout()
+    {
+        if (autoItemIndex < 0 || autoItemIndex >= items.Count)
+        { StopAutomaticWithError("Queue position became invalid during recovery."); return; }
+
+        var expected = items[autoItemIndex];
+        var currentMelds = CurrentMeldCount(expected);
+        if (currentMelds < 0)
+        { StopAutomaticWithError("Queued inventory slot changed during recovery; no retry was sent."); return; }
+
+        // The inventory update can arrive after the UI deadline. Count that as a
+        // success instead of replaying the just-completed slot.
+        if (autoPhase is AutoPhase.Monitoring or AutoPhase.WaitYesNo
+            && currentMelds > startingMeldCount)
+        {
+            RecordObservedSuccess(currentMelds, CountItem(pendingMateriaId));
+            Status = $"Recovered after a delayed success; slot {currentMelds} verified.";
+            return;
+        }
+
+        if (autoRecoveryAttempts >= 3)
+        {
+            StopAutomaticWithError($"Automatic recovery failed 3 times in phase {autoPhase}; inspect the item before continuing.");
+            return;
+        }
+
+        autoRecoveryAttempts++;
+        services.Log.Warning(
+            "Automatic phase {Phase} timed out for {Item}; recovery {Attempt}/3 with live meld count {Melds}",
+            autoPhase, expected.Name, autoRecoveryAttempts, currentMelds);
+
+        // A confirmation that appeared at the deadline is safe to process through
+        // the normal guarded confirmation phase.
+        var yesno = services.GameGui.GetAddonByName<AtkUnitBase>("SelectYesno");
+        if (autoPhase == AutoPhase.WaitYesNo && yesno != null && yesno->IsReady)
+        {
+            autoNextAction = DateTime.UtcNow;
+            autoDeadline = DateTime.UtcNow.AddSeconds(10);
+            Status = $"Recovery {autoRecoveryAttempts}/3: confirmation appeared late; continuing...";
+            return;
+        }
+
+        // Preserve materia already consumed by a stalled advanced attempt before
+        // opening a fresh detail window. The next WaitDetail snapshot starts a new
+        // attempt, while inventory identity and meld count are checked again.
+        if (autoPhase == AutoPhase.Monitoring)
+        {
+            var currentCount = CountItem(pendingMateriaId);
+            autoMateriaConsumed += Math.Max(0, startingMateriaCount - currentCount);
+            if (currentCount <= 0)
+            { StopAutomaticWithError("Materia reached zero during automatic recovery."); return; }
+        }
+
+        var detail = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttachDialog");
+        if (detail != null && detail->IsReady)
+            FireInts(detail, 1, 0, 0);
+
+        autoCandidateIndex = 0;
+        autoPhase = AutoPhase.SelectEquipment;
+        autoNextAction = DateTime.UtcNow.AddSeconds(Math.Max(1.0f, config.UiCooldownSeconds));
+        autoDeadline = DateTime.UtcNow.AddSeconds(20);
+        Status = $"Recovery {autoRecoveryAttempts}/3: item unchanged at {currentMelds}/5; reselecting safely...";
+    }
+
+    private void RecordObservedSuccess(int currentMelds, int currentMateriaCount)
+    {
+        var used = Math.Max(0, startingMateriaCount - currentMateriaCount);
+        autoCompletedMelds += currentMelds - startingMeldCount;
+        autoMateriaConsumed += used;
+        autoRecoveryAttempts = 0;
+        Status = $"Slot {currentMelds} succeeded with {autoMateriaName}; {used} consumed.";
+        autoPhase = AutoPhase.WaitReturn;
+        autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
+        autoDeadline = DateTime.UtcNow.AddSeconds(20);
     }
 
     private unsafe List<int> FindStringRows(AtkUnitBase* addon, int start, string exact)

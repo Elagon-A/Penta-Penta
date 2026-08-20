@@ -27,6 +27,8 @@ public enum CraftingMateria
 
 public sealed class CraftingMeldPreset
 {
+    // Defaults to true so presets saved by versions before 0.1.25 remain active.
+    public bool Enabled { get; set; } = true;
     public List<CraftingMateria> Slots { get; set; } =
     [
         CraftingMateria.None, CraftingMateria.None, CraftingMateria.None,

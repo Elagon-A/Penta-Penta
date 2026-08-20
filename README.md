@@ -9,6 +9,9 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - Default plan is Critical Hit → Direct Hit → Determination.
 - Grade XII is used for an item's native slots plus its first overmeld; later slots use grade XI. This means XII in slots 1–3 for normal two-slot gear and slots 1–2 for one-slot accessories.
 - Strict no-overcap, inventory identity, combat, login, window, timeout, and materia-quantity gates are enforced.
+- A stalled queue automatically reconciles the live item state and retries safely up to three times before stopping for inspection.
+- Exact crafting presets can be disabled temporarily without erasing their saved five-slot plan.
+- A nearby-marketboard overlay shows grade XI/XII battle and crafting materia stock and opens a clicked materia's native market listings.
 - Fresh and partially completed items can be queued; completed items are skipped after live 5/5 verification.
 - Live grade XI/XII materia inventory counts update during a run and highlight low or empty stock.
 - Eligible inventory gear has a **Pentameld** context-menu action that opens PentaPenta with the exact bag/slot selected.

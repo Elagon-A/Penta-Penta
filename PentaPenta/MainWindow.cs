@@ -153,14 +153,22 @@ internal sealed class MainWindow : Window
         var selectedItems = gear.Where(x => selected.Contains(Key(x))).ToList();
         if (selectedItems.Count != 1) return;
         var item = selectedItems[0];
-        var enabled = config.CraftingPresets.ContainsKey(item.ItemId);
+        config.CraftingPresets.TryGetValue(item.ItemId, out var preset);
+        var enabled = preset?.Enabled ?? false;
         if (ImGui.Checkbox($"Use exact crafting preset for {item.Name}", ref enabled))
         {
-            if (enabled) config.CraftingPresets[item.ItemId] = new CraftingMeldPreset();
-            else config.CraftingPresets.Remove(item.ItemId);
+            if (preset is null)
+            {
+                preset = new CraftingMeldPreset { Enabled = enabled };
+                config.CraftingPresets[item.ItemId] = preset;
+            }
+            else
+            {
+                preset.Enabled = enabled;
+            }
             services.PluginInterface.SavePluginConfig(config);
         }
-        if (!enabled || !config.CraftingPresets.TryGetValue(item.ItemId, out var preset)) return;
+        if (!enabled || preset is null) return;
 
         while (preset.Slots.Count < 5) preset.Slots.Add(CraftingMateria.None);
         for (var i = 0; i < 5; i++)

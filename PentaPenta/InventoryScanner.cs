@@ -53,6 +53,17 @@ internal sealed class InventoryScanner(Services services)
             new("CP", counts.GetValueOrDefault(41779u), counts.GetValueOrDefault(41766u)),
         ];
     }
+
+    public Dictionary<uint, int> ScanItemCounts(IEnumerable<uint> itemIds)
+    {
+        var wanted = itemIds.ToHashSet();
+        var counts = wanted.ToDictionary(x => x, _ => 0);
+        foreach (var bag in Bags)
+        foreach (ref readonly var slot in services.Inventory.GetInventoryItems(bag))
+            if (!slot.IsEmpty && wanted.Contains(slot.BaseItemId))
+                counts[slot.BaseItemId] += slot.Quantity;
+        return counts;
+    }
 }
 
 internal sealed record MateriaStock(string Stat, int Grade12, int Grade11);

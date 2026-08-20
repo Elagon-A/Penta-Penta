@@ -11,6 +11,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Services services;
     private readonly WindowSystem windows = new("PentaPenta");
     private readonly MainWindow main;
+    private readonly MarketBoardOverlay marketBoardOverlay;
     private readonly Melding.MeldController controller;
 
     public Plugin(
@@ -22,15 +23,18 @@ public sealed class Plugin : IDalamudPlugin
         IGameGui gameGui,
         IClientState clientState,
         ICondition condition,
+        IObjectTable objects,
         IContextMenu contextMenu,
         IPluginLog log)
     {
-        services = new Services(pi, commands, framework, inventory, data, gameGui, clientState, condition, contextMenu, log);
+        services = new Services(pi, commands, framework, inventory, data, gameGui, clientState, condition, objects, contextMenu, log);
         var config = pi.GetPluginConfig() as Configuration ?? new Configuration();
         var scanner = new InventoryScanner(services);
         controller = new Melding.MeldController(services, config);
         main = new MainWindow(services, config, scanner, controller);
+        marketBoardOverlay = new MarketBoardOverlay(services, scanner);
         windows.AddWindow(main);
+        windows.AddWindow(marketBoardOverlay);
         services.Commands.AddHandler("/pentapenta", new CommandInfo((_, _) => main.Toggle()) { HelpMessage = "Open PentaPenta." });
         services.ContextMenu.OnMenuOpened += OnContextMenuOpened;
         pi.UiBuilder.Draw += windows.Draw;
@@ -45,6 +49,7 @@ public sealed class Plugin : IDalamudPlugin
         services.PluginInterface.UiBuilder.OpenMainUi -= main.Toggle;
         windows.RemoveAllWindows();
         controller.Dispose();
+        marketBoardOverlay.Dispose();
     }
 
     private void OnContextMenuOpened(IMenuOpenedArgs args)
