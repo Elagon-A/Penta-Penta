@@ -33,6 +33,7 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     private uint pendingItemId;
     private string pendingItemName = "";
     private DateTime pendingDeadline;
+    private DateTime pendingNextAction;
     private PendingPhase pendingPhase;
     private DateTime nextStockRefresh;
     private Dictionary<uint, int> stock = [];
@@ -167,6 +168,11 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
             RunNativeSearch();
             return;
         }
+        if (pendingPhase == PendingPhase.FocusingSearch && DateTime.UtcNow >= pendingNextAction)
+        {
+            SubmitNativeSearch();
+            return;
+        }
         if (pendingPhase == PendingPhase.WaitingForSearchResults)
         {
             SelectExactSearchResult();
@@ -192,9 +198,23 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         }
 
         addon->SetModeFilter(AddonItemSearch.SearchMode.Normal, 0);
+        addon->SetFocusNode((AtkResNode*)((AtkComponentBase*)addon->SearchTextInput)->OwnerNode, true, 0);
+        addon->SearchTextInput->IsActive = true;
+        addon->SearchTextInput->SetText(pendingItemName);
         addon->SearchText.SetString(pendingItemName);
         addon->SearchText2.SetString(pendingItemName);
-        addon->SearchTextInput->SetText(pendingItemName);
+        pendingPhase = PendingPhase.FocusingSearch;
+        pendingNextAction = DateTime.UtcNow.AddMilliseconds(250);
+        pendingDeadline = DateTime.UtcNow.AddSeconds(12);
+        status = $"Entering {pendingItemName} in market search...";
+    }
+
+    private unsafe void SubmitNativeSearch()
+    {
+        var addon = services.GameGui.GetAddonByName<AddonItemSearch>("ItemSearch");
+        if (addon == null || !addon->IsReady || addon->SearchTextInput == null || addon->ResultsList == null)
+            return;
+
         addon->RunSearch(true);
         pendingPhase = PendingPhase.WaitingForSearchResults;
         pendingDeadline = DateTime.UtcNow.AddSeconds(12);
@@ -269,5 +289,5 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     public void Dispose() => services.Framework.Update -= OnFrameworkUpdate;
 
     private sealed record MarketMateriaRow(string Stat, uint Grade12ItemId, uint Grade11ItemId);
-    private enum PendingPhase { None, OpeningBoard, WaitingForSearchResults, WaitingForListings }
+    private enum PendingPhase { None, OpeningBoard, FocusingSearch, WaitingForSearchResults, WaitingForListings }
 }
