@@ -34,9 +34,9 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     private uint pendingItemId;
     private string pendingItemName = "";
     private DateTime pendingDeadline;
-    private DateTime pendingNextAction;
     private PendingPhase pendingPhase;
     private DateTime nextStockRefresh;
+    private string lastDiagnosticSnapshot = "";
     private Dictionary<uint, int> stock = [];
     private string status = "Click a materia to open its market listings.";
     private bool wasNearMarketBoard;
@@ -167,6 +167,7 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
                 PendingPhase.FocusingSearch => "Marketboard did not enter text-search mode or enable Search.",
                 PendingPhase.WaitingForSearchResults => "Marketboard item search returned no exact result before timing out.",
                 PendingPhase.WaitingForListings => "The selected materia's listings did not open before timing out.",
+                PendingPhase.DiagnosticManualSearch => "Market search diagnostic timed out before Search was pressed.",
                 _ => "Marketboard operation timed out.",
             };
             CancelPending(timeoutMessage);
@@ -177,9 +178,9 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
             RunNativeSearch();
             return;
         }
-        if (pendingPhase == PendingPhase.FocusingSearch && DateTime.UtcNow >= pendingNextAction)
+        if (pendingPhase == PendingPhase.DiagnosticManualSearch)
         {
-            SubmitNativeSearch();
+            ObserveManualSearchDiagnostic();
             return;
         }
         if (pendingPhase == PendingPhase.WaitingForSearchResults)
@@ -254,10 +255,46 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         textChanged((AtkUnitBase*)addon, InputCallbackType.TextChanged,
             textInputBase->RawString.StringPtr, textInputBase->EvaluatedString.StringPtr,
             textInputBase->CallbackEventKind);
-        pendingPhase = PendingPhase.FocusingSearch;
-        pendingNextAction = DateTime.UtcNow.AddMilliseconds(250);
+        // Diagnostic mode deliberately stops here. A real user click supplies the
+        // internal transition that SetText does not, while we record every exposed
+        // addon/agent state change without invoking unsafe global focus or events.
+        pendingPhase = PendingPhase.DiagnosticManualSearch;
+        pendingDeadline = DateTime.UtcNow.AddMinutes(2);
+        lastDiagnosticSnapshot = "";
+        status = $"DIAGNOSTIC: click the search field, then click Search for {pendingItemName}.";
+        LogDiagnosticSnapshot("text populated");
+    }
+
+    private unsafe void ObserveManualSearchDiagnostic()
+    {
+        LogDiagnosticSnapshot("state changed");
+
+        var agentModule = AgentModule.Instance();
+        var agent = agentModule == null ? null : (AgentItemSearch*)agentModule->GetAgentByInternalId(AgentId.ItemSearch);
+        if (agent == null || agent->ItemBuffer == null || agent->ItemCount == 0) return;
+
+        services.Log.Information("[MarketDiagnostic] Native search produced {Count} result(s); selecting exact item {ItemId}.",
+            agent->ItemCount, pendingItemId);
+        pendingPhase = PendingPhase.WaitingForSearchResults;
         pendingDeadline = DateTime.UtcNow.AddSeconds(12);
-        status = $"Entering {pendingItemName} in market search...";
+        status = $"DIAGNOSTIC captured; opening exact result for {pendingItemName}...";
+        SelectExactSearchResult();
+    }
+
+    private unsafe void LogDiagnosticSnapshot(string reason)
+    {
+        var addon = services.GameGui.GetAddonByName<AddonItemSearch>("ItemSearch");
+        var agentModule = AgentModule.Instance();
+        var agent = agentModule == null ? null : (AgentItemSearch*)agentModule->GetAgentByInternalId(AgentId.ItemSearch);
+        if (addon == null || !addon->IsReady || addon->SearchTextInput == null || addon->SearchButton == null) return;
+
+        var snapshot = $"mode={addon->Mode}; filter={addon->SelectedFilter}; "
+            + $"inputActive={addon->SearchTextInput->IsActive}; searchEnabled={addon->SearchButton->IsEnabled}; "
+            + $"results={(addon->ResultsList == null ? -1 : addon->ResultsList->GetItemCount())}; "
+            + $"agentItems={(agent == null ? -1 : (int)agent->ItemCount)}";
+        if (snapshot == lastDiagnosticSnapshot) return;
+        lastDiagnosticSnapshot = snapshot;
+        services.Log.Information("[MarketDiagnostic] {Reason}: {Snapshot}", reason, snapshot);
     }
 
     private unsafe void SubmitNativeSearch()
@@ -347,5 +384,5 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     public void Dispose() => services.Framework.Update -= OnFrameworkUpdate;
 
     private sealed record MarketMateriaRow(string Stat, uint Grade12ItemId, uint Grade11ItemId);
-    private enum PendingPhase { None, OpeningBoard, FocusingSearch, WaitingForSearchResults, WaitingForListings }
+    private enum PendingPhase { None, OpeningBoard, FocusingSearch, DiagnosticManualSearch, WaitingForSearchResults, WaitingForListings }
 }
