@@ -266,14 +266,7 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         lastDiagnosticSnapshot = "";
         diagnosticInitialVisibleResults = addon->ResultsList->GetItemCount();
         LogDiagnosticSnapshot("text populated");
-        // Staged callback test: reproduce only the verified field activation.
-        // FocusStart carries no mouse coordinates; the ItemSearch handler keys
-        // this transition by its stable callback parameter (5).
-        addon->ReceiveEvent(AtkEventType.FocusStart, 5, null);
-        status = addon->SearchButton->IsEnabled
-            ? $"FOCUS TEST PASSED: click Search for {pendingItemName}."
-            : $"FOCUS TEST did not enable Search; click the field, then Search for {pendingItemName}.";
-        LogDiagnosticSnapshot("FocusStart(5) dispatched");
+        status = $"SAFE MODE: click the search field, then Search for {pendingItemName}.";
     }
 
     private unsafe void ObserveManualSearchDiagnostic()
