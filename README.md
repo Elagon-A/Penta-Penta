@@ -25,6 +25,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - Market search diagnostic mode records the safe addon and search-agent transitions produced by one manual field click and Search press.
 - Diagnostic searches ignore cached agent results and advance only after the current Item Search window receives a new visible result list.
 - Callback diagnostics use Dalamud's supported addon lifecycle listener to record the native event type and parameter from manual Item Search interactions without replaying pointers.
+- The staged market test dispatches only the verified Item Search `FocusStart(5)` callback, then requires a manual Search press before any button automation is attempted.
 - The shopping overlay uses compact Battle/Crafting tables where the live XI/XII inventory quantities are the listing buttons.
 - A complete exact crafting preset can be copied, then applied as independent saved presets to every checked queue item type.
 - Fresh and partially completed items can be queued; completed items are skipped after live 5/5 verification.
