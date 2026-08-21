@@ -37,6 +37,7 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     private PendingPhase pendingPhase;
     private DateTime nextStockRefresh;
     private string lastDiagnosticSnapshot = "";
+    private int diagnosticInitialVisibleResults;
     private Dictionary<uint, int> stock = [];
     private string status = "Click a materia to open its market listings.";
     private bool wasNearMarketBoard;
@@ -261,6 +262,7 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         pendingPhase = PendingPhase.DiagnosticManualSearch;
         pendingDeadline = DateTime.UtcNow.AddMinutes(2);
         lastDiagnosticSnapshot = "";
+        diagnosticInitialVisibleResults = addon->ResultsList->GetItemCount();
         status = $"DIAGNOSTIC: click the search field, then click Search for {pendingItemName}.";
         LogDiagnosticSnapshot("text populated");
     }
@@ -269,9 +271,14 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     {
         LogDiagnosticSnapshot("state changed");
 
+        var addon = services.GameGui.GetAddonByName<AddonItemSearch>("ItemSearch");
         var agentModule = AgentModule.Instance();
         var agent = agentModule == null ? null : (AgentItemSearch*)agentModule->GetAgentByInternalId(AgentId.ItemSearch);
-        if (agent == null || agent->ItemBuffer == null || agent->ItemCount == 0) return;
+        var visibleResults = addon == null || !addon->IsReady || addon->ResultsList == null
+            ? -1
+            : addon->ResultsList->GetItemCount();
+        if (agent == null || agent->ItemBuffer == null || agent->ItemCount == 0
+            || visibleResults <= diagnosticInitialVisibleResults) return;
 
         services.Log.Information("[MarketDiagnostic] Native search produced {Count} result(s); selecting exact item {ItemId}.",
             agent->ItemCount, pendingItemId);
