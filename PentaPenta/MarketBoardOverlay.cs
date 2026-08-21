@@ -160,7 +160,15 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         if (pendingItemId == 0) return;
         if (DateTime.UtcNow > pendingDeadline)
         {
-            CancelPending("Marketboard opening timed out. Move closer and click the materia again.");
+            var timeoutMessage = pendingPhase switch
+            {
+                PendingPhase.OpeningBoard => "Marketboard opening timed out. Move closer and click the materia again.",
+                PendingPhase.FocusingSearch => "Marketboard did not enter text-search mode or enable Search.",
+                PendingPhase.WaitingForSearchResults => "Marketboard item search returned no exact result before timing out.",
+                PendingPhase.WaitingForListings => "The selected materia's listings did not open before timing out.",
+                _ => "Marketboard operation timed out.",
+            };
+            CancelPending(timeoutMessage);
             return;
         }
         if (pendingPhase == PendingPhase.OpeningBoard && IsMarketSearchReady())
@@ -230,6 +238,9 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         addon->SetFocusNode((AtkResNode*)inputNode, true, 0);
         addon->SearchTextInput->IsActive = true;
         addon->SearchTextInput->SetText(pendingItemName);
+        addon->SetModeFilter(AddonItemSearch.SearchMode.Normal, -1);
+        addon->Mode = AddonItemSearch.SearchMode.Normal;
+        addon->SelectedFilter = -1;
         addon->SearchText.SetString(pendingItemName);
         addon->SearchText2.SetString(pendingItemName);
         pendingPhase = PendingPhase.FocusingSearch;

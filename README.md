@@ -18,6 +18,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - One-click market searches focus and activate the native text field before submitting, matching the game's search-button enablement sequence.
 - Market searches dispatch the text field's native click event to leave category mode, then wait until the game's Search button reports enabled.
 - Native market text-field clicks resolve through the input collision node used by the current game UI, with an owner-node fallback.
+- Text searches explicitly clear the retained category filter and report phase-specific timeout errors.
 - The shopping overlay uses compact Battle/Crafting tables where the live XI/XII inventory quantities are the listing buttons.
 - A complete exact crafting preset can be copied, then applied as independent saved presets to every checked queue item type.
 - Fresh and partially completed items can be queued; completed items are skipped after live 5/5 verification.
