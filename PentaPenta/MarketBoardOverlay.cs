@@ -8,6 +8,7 @@ using FFXIVClientStructs.FFXIV.Client.Game.Control;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
+using InteropGenerator.Runtime;
 
 namespace PentaPenta;
 
@@ -243,6 +244,16 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         addon->SelectedFilter = -1;
         addon->SearchText.SetString(pendingItemName);
         addon->SearchText2.SetString(pendingItemName);
+        if (textInputBase->Callback == null)
+        {
+            CancelPending("The native market search field had no text-change callback.");
+            return;
+        }
+        var textChanged = (delegate* unmanaged<AtkUnitBase*, InputCallbackType, CStringPointer,
+            CStringPointer, int, InputCallbackResult>)textInputBase->Callback;
+        textChanged((AtkUnitBase*)addon, InputCallbackType.TextChanged,
+            textInputBase->RawString.StringPtr, textInputBase->EvaluatedString.StringPtr,
+            textInputBase->CallbackEventKind);
         pendingPhase = PendingPhase.FocusingSearch;
         pendingNextAction = DateTime.UtcNow.AddMilliseconds(250);
         pendingDeadline = DateTime.UtcNow.AddSeconds(12);
