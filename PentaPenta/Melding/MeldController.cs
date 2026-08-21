@@ -45,6 +45,8 @@ internal sealed class MeldController : IDisposable
     private uint pendingMateriaId;
     private int startingMateriaCount;
     private int startingMeldCount;
+    private int autoLastMateriaCount;
+    private DateTime autoLastProgressAt;
     private AutoPhase autoPhase;
     private DateTime autoNextAction;
     private DateTime autoDeadline;
@@ -272,6 +274,7 @@ internal sealed class MeldController : IDisposable
             var used = Math.Max(0, startingMateriaCount - currentCount);
             advancedPhase = AdvancedPhase.None;
             State = RunState.Complete;
+            RecordMateriaHistory(pendingMateriaId, used);
             Status = $"Advanced meld succeeded; {used} materia consumed. Refresh before continuing.";
         }
         else if (currentCount <= 0)
@@ -448,6 +451,8 @@ internal sealed class MeldController : IDisposable
 
                 startingMeldCount = currentMelds;
                 startingMateriaCount = CountItem(pendingMateriaId);
+                autoLastMateriaCount = startingMateriaCount;
+                autoLastProgressAt = DateTime.UtcNow;
                 if (currentMelds < expected.MateriaSlotCount)
                 {
                     FireInts(detail, 0, 0, 0);
@@ -470,13 +475,22 @@ internal sealed class MeldController : IDisposable
                 if (yesno == null || !yesno->IsReady) return;
                 FireInts(yesno, 0);
                 autoPhase = AutoPhase.Monitoring;
-                autoDeadline = DateTime.UtcNow.AddMinutes(6);
+                autoLastProgressAt = DateTime.UtcNow;
+                autoDeadline = DateTime.UtcNow.AddSeconds(30);
                 Status = $"Bulk advanced meld running for slot {startingMeldCount + 1}...";
                 break;
             }
             case AutoPhase.Monitoring:
             {
                 var count = CountItem(pendingMateriaId);
+                if (count != autoLastMateriaCount)
+                {
+                    autoLastMateriaCount = count;
+                    autoLastProgressAt = DateTime.UtcNow;
+                    autoDeadline = DateTime.UtcNow.AddSeconds(20);
+                    var attempted = Math.Max(0, startingMateriaCount - count);
+                    Status = $"Slot {startingMeldCount + 1}: bulk meld active; {attempted} materia consumed this attempt...";
+                }
                 if (currentMelds > startingMeldCount)
                 {
                     RecordObservedSuccess(currentMelds, count);
@@ -552,7 +566,18 @@ internal sealed class MeldController : IDisposable
         if (autoPhase == AutoPhase.Monitoring)
         {
             var currentCount = CountItem(pendingMateriaId);
-            autoMateriaConsumed += Math.Max(0, startingMateriaCount - currentCount);
+            var quietFor = DateTime.UtcNow - autoLastProgressAt;
+            if (currentCount != autoLastMateriaCount || quietFor < TimeSpan.FromSeconds(15))
+            {
+                autoLastMateriaCount = currentCount;
+                autoLastProgressAt = DateTime.UtcNow;
+                autoDeadline = DateTime.UtcNow.AddSeconds(20);
+                Status = $"Bulk meld still active; waiting before retry ({Math.Max(0, startingMateriaCount - currentCount)} consumed)...";
+                return;
+            }
+            var recoveredUsed = Math.Max(0, startingMateriaCount - currentCount);
+            autoMateriaConsumed += recoveredUsed;
+            RecordMateriaHistory(pendingMateriaId, recoveredUsed);
             if (currentCount <= 0)
             { StopAutomaticWithError("Materia reached zero during automatic recovery."); return; }
         }
@@ -573,6 +598,7 @@ internal sealed class MeldController : IDisposable
         var used = Math.Max(0, startingMateriaCount - currentMateriaCount);
         autoCompletedMelds += currentMelds - startingMeldCount;
         autoMateriaConsumed += used;
+        RecordMateriaHistory(pendingMateriaId, used);
         autoRecoveryAttempts = 0;
         Status = $"Slot {currentMelds} succeeded with {autoMateriaName}; {used} consumed.";
         autoPhase = AutoPhase.WaitReturn;
@@ -648,6 +674,13 @@ internal sealed class MeldController : IDisposable
             foreach (ref readonly var item in services.Inventory.GetInventoryItems(type))
                 if (!item.IsEmpty && item.BaseItemId == itemId) total += item.Quantity;
         return total;
+    }
+
+    private void RecordMateriaHistory(uint itemId, int amount)
+    {
+        if (itemId == 0 || amount <= 0) return;
+        config.MateriaConsumedHistory[itemId] = config.MateriaConsumedHistory.GetValueOrDefault(itemId) + amount;
+        services.PluginInterface.SavePluginConfig(config);
     }
 
     private int CurrentMeldCount(InventoryGear expected)

@@ -39,9 +39,38 @@ internal sealed class MainWindow : Window
     public override void Draw()
     {
         RefreshMateriaStockIfDue();
+        if (!ImGui.BeginTabBar("main-tabs")) return;
+        if (ImGui.BeginTabItem("Queue"))
+        {
+            DrawQueueTab();
+            ImGui.EndTabItem();
+        }
+        if (ImGui.BeginTabItem("Materia History"))
+        {
+            DrawMateriaHistory();
+            ImGui.EndTabItem();
+        }
+        ImGui.EndTabBar();
+    }
+
+    private void DrawQueueTab()
+    {
         ImGui.TextWrapped("Select inventory gear, arrange your queue, then open Materia Melding. Each item is tracked by bag and slot so duplicate rings remain distinct.");
         ImGui.Separator();
         if (ImGui.Button("Refresh inventory")) Refresh();
+        ImGui.SameLine();
+        if (ImGui.Button("Select all"))
+        {
+            selected.Clear();
+            foreach (var item in gear) selected.Add(Key(item));
+            SaveQueue();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Clear all"))
+        {
+            selected.Clear();
+            SaveQueue();
+        }
         ImGui.SameLine(); ImGui.SetNextItemWidth(260); ImGui.InputTextWithHint("##filter", "Filter gear...", ref filter, 100);
         ImGui.SameLine(); ImGui.TextDisabled($"{selected.Count} selected");
 
@@ -122,6 +151,38 @@ internal sealed class MainWindow : Window
         ImGui.SameLine();
         if (ImGui.Button("Stop")) controller.Stop();
         ImGui.TextDisabled("Keep Materia Melding open and do not interact with either window while the queue is running.");
+    }
+
+    private void DrawMateriaHistory()
+    {
+        var history = config.MateriaConsumedHistory
+            .Where(x => x.Value > 0)
+            .Select(x => new
+            {
+                ItemId = x.Key,
+                Name = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(x.Key)?.Name.ExtractText() ?? $"Item {x.Key}",
+                Count = x.Value,
+            })
+            .OrderByDescending(x => x.Count)
+            .ThenBy(x => x.Name)
+            .ToList();
+        var total = history.Sum(x => x.Count);
+        ImGui.TextUnformatted($"Total materia consumed: {total:N0}");
+        ImGui.TextDisabled("History begins with version 0.1.48 and persists across plugin updates.");
+        ImGui.Separator();
+        if (!ImGui.BeginTable("materia-history", 2,
+                ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY,
+                new Vector2(0, -1))) return;
+        ImGui.TableSetupColumn("Materia");
+        ImGui.TableSetupColumn("Consumed", ImGuiTableColumnFlags.WidthFixed, 130);
+        ImGui.TableHeadersRow();
+        foreach (var row in history)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn(); ImGui.TextUnformatted(row.Name);
+            ImGui.TableNextColumn(); ImGui.TextUnformatted(row.Count.ToString("N0"));
+        }
+        ImGui.EndTable();
     }
 
     private void Refresh()

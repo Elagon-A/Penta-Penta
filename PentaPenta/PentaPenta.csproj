@@ -1,6 +1,6 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.1.46</Version>
+    <Version>0.1.49</Version>
     <PackageProjectUrl>https://github.com/Elagon-A/Penta-Penta</PackageProjectUrl>
     <Authors>Luis</Authors>
     <Description>Queue inventory gear and pentameld it with configurable stat priorities.</Description>

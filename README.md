@@ -5,12 +5,14 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 ## Current state
 
 - Inventory picker distinguishes duplicate items by container and slot.
+- Queue controls can select or clear every eligible inventory item in one click.
 - Queue persists across reloads and processes distinct-name items sequentially.
 - Default plan is Critical Hit → Direct Hit → Determination.
 - DoH equipment without an enabled exact preset defaults to Craftsmanship → CP → Control; exact five-slot presets still take precedence.
 - Grade XII is used for an item's native slots plus its first overmeld; later slots use grade XI. This means XII in slots 1–3 for normal two-slot gear and slots 1–2 for one-slot accessories.
 - Strict no-overcap, inventory identity, combat, login, window, timeout, and materia-quantity gates are enforced.
 - A stalled queue automatically reconciles the live item state and retries safely up to three times before stopping for inspection.
+- Bulk overmeld recovery shows live materia consumption, extends its wait while attempts are progressing, and retries the same verified slot after at least 15 seconds of inactivity.
 - Exact crafting presets can be disabled temporarily without erasing their saved five-slot plan.
 - Exact crafting presets allow a positive partial stat gain when the selected materia intentionally reaches an item's cap; zero-gain melds are still rejected.
 - A nearby-marketboard overlay shows grade XI/XII battle and crafting materia stock and opens a clicked materia's native market listings.
@@ -30,6 +32,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - A complete exact crafting preset can be copied, then applied as independent saved presets to every checked queue item type.
 - Fresh and partially completed items can be queued; completed items are skipped after live 5/5 verification.
 - Live grade XI/XII materia inventory counts update during a run and highlight low or empty stock.
+- A persistent Materia History tab totals consumption by materia type and preserves the statistics across updates and restarts.
 - Eligible inventory gear has a **Pentameld** context-menu action that opens PentaPenta with the exact bag/slot selected.
 - Preparing a queue opens the Materia Melding window automatically when it is available.
 - Overcap rejections are cached per item and grade during a queue so later slots skip choices already proven not to fit.

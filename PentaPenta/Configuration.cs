@@ -11,6 +11,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool EnableMarketBoardOverlay { get; set; } = true;
     public List<QueuedItem> Queue { get; set; } = [];
     public Dictionary<uint, CraftingMeldPreset> CraftingPresets { get; set; } = [];
+    public Dictionary<uint, long> MateriaConsumedHistory { get; set; } = [];
 }
 
 public sealed record QueuedItem(uint ItemId, string Name, int Container, uint Slot, bool Hq);
