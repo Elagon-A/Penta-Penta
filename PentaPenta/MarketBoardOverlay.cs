@@ -168,7 +168,7 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
                 PendingPhase.FocusingSearch => "Marketboard did not enter text-search mode or enable Search.",
                 PendingPhase.WaitingForSearchResults => "Marketboard item search returned no exact result before timing out.",
                 PendingPhase.WaitingForListings => "The selected materia's listings did not open before timing out.",
-                PendingPhase.DiagnosticManualSearch => "Market search diagnostic timed out before Search was pressed.",
+                PendingPhase.DiagnosticManualSearch => "Automatic market search produced no fresh visible results.",
                 _ => "Marketboard operation timed out.",
             };
             CancelPending(timeoutMessage);
@@ -256,15 +256,18 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         textChanged((AtkUnitBase*)addon, InputCallbackType.TextChanged,
             textInputBase->RawString.StringPtr, textInputBase->EvaluatedString.StringPtr,
             textInputBase->CallbackEventKind);
-        // Diagnostic mode deliberately stops here. A real user click supplies the
-        // internal transition that SetText does not, while we record every exposed
-        // addon/agent state change without invoking unsafe global focus or events.
+        // The diagnostic showed that a real field click changes only the Search
+        // button's enabled state among the exposed addon fields. Reproduce that
+        // narrow state change, then use the addon's existing non-event search API.
         pendingPhase = PendingPhase.DiagnosticManualSearch;
-        pendingDeadline = DateTime.UtcNow.AddMinutes(2);
+        pendingDeadline = DateTime.UtcNow.AddSeconds(20);
         lastDiagnosticSnapshot = "";
         diagnosticInitialVisibleResults = addon->ResultsList->GetItemCount();
-        status = $"DIAGNOSTIC: click the search field, then click Search for {pendingItemName}.";
         LogDiagnosticSnapshot("text populated");
+        addon->SearchButton->SetEnabledState(true);
+        LogDiagnosticSnapshot("search enabled safely");
+        addon->RunSearch(true);
+        status = $"TEST: searching automatically for {pendingItemName}...";
     }
 
     private unsafe void ObserveManualSearchDiagnostic()
