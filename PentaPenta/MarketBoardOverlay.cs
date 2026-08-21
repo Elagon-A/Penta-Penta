@@ -219,24 +219,35 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         // text/partial-match mode, which is what enables the Search button.
         var textInputBase = (AtkComponentInputBase*)addon->SearchTextInput;
         var collisionNode = textInputBase->CollisionNode;
-        var clickEvent = collisionNode == null
+        var eventHead = collisionNode == null
             ? null
             : (AtkEvent*)collisionNode->AtkResNode.AtkEventManager.Event;
+        var clickEvent = eventHead;
         while (clickEvent != null && clickEvent->State.EventType != AtkEventType.MouseClick)
             clickEvent = clickEvent->NextEvent;
         if (clickEvent == null)
         {
-            clickEvent = (AtkEvent*)inputNode->AtkResNode.AtkEventManager.Event;
+            eventHead = (AtkEvent*)inputNode->AtkResNode.AtkEventManager.Event;
+            clickEvent = eventHead;
             while (clickEvent != null && clickEvent->State.EventType != AtkEventType.MouseClick)
                 clickEvent = clickEvent->NextEvent;
         }
-        if (clickEvent == null)
+        if (clickEvent == null || eventHead == null)
         {
             CancelPending("The native market search field had no click event.");
             return;
         }
-        addon->ReceiveEvent(clickEvent->State.EventType, (int)clickEvent->Param, clickEvent);
-        addon->SetFocusNode((AtkResNode*)inputNode, true, 0);
+        // ReceiveEvent expects the matching event's type/parameter, but the event
+        // list head as its data pointer. Passing the matching node itself looks
+        // focused visually without activating the input component.
+        addon->ReceiveEvent(clickEvent->State.EventType, (int)clickEvent->Param, eventHead);
+        var stage = AtkStage.Instance();
+        var inputManager = stage == null ? null : stage->AtkInputManager;
+        if (inputManager == null || !inputManager->SetFocus((AtkResNode*)inputNode, (AtkUnitBase*)addon, 0))
+        {
+            CancelPending("The native market search field could not receive input focus.");
+            return;
+        }
         addon->SearchTextInput->IsActive = true;
         addon->SearchTextInput->SetText(pendingItemName);
         addon->SetModeFilter(AddonItemSearch.SearchMode.Normal, -1);
@@ -273,7 +284,18 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
             return;
         }
 
-        addon->RunSearch(true);
+        var searchNode = ((AtkComponentBase*)addon->SearchButton)->OwnerNode;
+        var searchEvent = searchNode == null
+            ? null
+            : (AtkEvent*)searchNode->AtkResNode.AtkEventManager.Event;
+        if (searchEvent == null)
+        {
+            CancelPending("The native Search button had no registered click event.");
+            return;
+        }
+        // Dispatch the button's registered event rather than calling RunSearch;
+        // this follows the same route as an actual click and populates ItemBuffer.
+        addon->ReceiveEvent(searchEvent->State.EventType, (int)searchEvent->Param, searchEvent);
         pendingPhase = PendingPhase.WaitingForSearchResults;
         pendingDeadline = DateTime.UtcNow.AddSeconds(12);
         status = $"Searching the marketboard for {pendingItemName}...";
