@@ -21,13 +21,14 @@ public sealed class Plugin : IDalamudPlugin
         IGameInventory inventory,
         IDataManager data,
         IGameGui gameGui,
+        IAddonLifecycle addonLifecycle,
         IClientState clientState,
         ICondition condition,
         IObjectTable objects,
         IContextMenu contextMenu,
         IPluginLog log)
     {
-        services = new Services(pi, commands, framework, inventory, data, gameGui, clientState, condition, objects, contextMenu, log);
+        services = new Services(pi, commands, framework, inventory, data, gameGui, addonLifecycle, clientState, condition, objects, contextMenu, log);
         var config = pi.GetPluginConfig() as Configuration ?? new Configuration();
         var scanner = new InventoryScanner(services);
         controller = new Melding.MeldController(services, config);

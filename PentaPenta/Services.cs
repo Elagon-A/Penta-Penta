@@ -10,6 +10,7 @@ internal sealed class Services(
     IGameInventory inventory,
     IDataManager data,
     IGameGui gameGui,
+    IAddonLifecycle addonLifecycle,
     IClientState clientState,
     ICondition condition,
     IObjectTable objects,
@@ -22,6 +23,7 @@ internal sealed class Services(
     internal IGameInventory Inventory { get; } = inventory;
     internal IDataManager Data { get; } = data;
     internal IGameGui GameGui { get; } = gameGui;
+    internal IAddonLifecycle AddonLifecycle { get; } = addonLifecycle;
     internal IClientState ClientState { get; } = clientState;
     internal ICondition Condition { get; } = condition;
     internal IObjectTable Objects { get; } = objects;
