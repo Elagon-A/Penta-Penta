@@ -372,17 +372,18 @@ internal sealed class MeldController : IDisposable
                 }
 
                 autoUsingExactPreset = false;
-                while (autoCandidateIndex < MeldPlan.Priority.Length
+                var priority = MeldPlan.PriorityFor(expected.IsCraftingGear);
+                while (autoCandidateIndex < priority.Length
                     && autoRejectedChoices.Contains((autoItemIndex, grade, autoCandidateIndex)))
                 {
                     services.Log.Information(
                         "Auto skipping cached overcap choice {Choice} grade {Grade} for {Item}",
-                        MeldPlan.Priority[autoCandidateIndex].Stat, grade, expected.Name);
+                        priority[autoCandidateIndex].Stat, grade, expected.Name);
                     autoCandidateIndex++;
                 }
-                if (autoCandidateIndex >= MeldPlan.Priority.Length)
+                if (autoCandidateIndex >= priority.Length)
                 { StopAutomaticWithError($"No priority materia fits slot {slot} without overcapping."); return; }
-                var choice = MeldPlan.Priority[autoCandidateIndex];
+                var choice = priority[autoCandidateIndex];
                 autoMateriaName = MateriaName(choice.Stat, grade);
                 pendingMateriaId = grade == 12 ? choice.Grade12ItemId : choice.Grade11ItemId;
                 autoExpectedGain = grade == 12 ? choice.Grade12Gain : choice.Grade11Gain;
@@ -628,7 +629,13 @@ internal sealed class MeldController : IDisposable
         (MeldStat.DirectHit, 12) => "Heavens' Eye Materia XII",
         (MeldStat.DirectHit, _) => "Heavens' Eye Materia XI",
         (MeldStat.Determination, 12) => "Savage Might Materia XII",
-        _ => "Savage Might Materia XI"
+        (MeldStat.Determination, _) => "Savage Might Materia XI",
+        (MeldStat.Craftsmanship, 12) => "Craftsman's Competence Materia XII",
+        (MeldStat.Craftsmanship, _) => "Craftsman's Competence Materia XI",
+        (MeldStat.Cp, 12) => "Craftsman's Cunning Materia XII",
+        (MeldStat.Cp, _) => "Craftsman's Cunning Materia XI",
+        (MeldStat.Control, 12) => "Craftsman's Command Materia XII",
+        _ => "Craftsman's Command Materia XI"
     };
 
     private void StopAutomaticWithError(string message)

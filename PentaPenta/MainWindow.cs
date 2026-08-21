@@ -94,6 +94,7 @@ internal sealed class MainWindow : Window
         }
 
         ImGui.Text("Plan: Critical Hit  >  Direct Hit  >  Determination");
+        ImGui.Text("DoH default: Craftsmanship  >  CP  >  Control");
         ImGui.TextDisabled("Grade XII: native slots + first overmeld   |   later slots: grade XI   |   strict no-overcap");
         ImGui.Separator();
         ImGui.TextWrapped($"Status: {controller.Status}");

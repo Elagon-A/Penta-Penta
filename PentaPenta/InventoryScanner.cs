@@ -26,9 +26,12 @@ internal sealed class InventoryScanner(Services services)
             if (slot.IsEmpty) continue;
             var item = services.Data.GetExcelSheet<Item>().GetRowOrDefault(slot.BaseItemId);
             if (item is null || item.Value.EquipSlotCategory.RowId == 0 || item.Value.MateriaSlotCount == 0) continue;
+            var jobs = services.Data.GetExcelSheet<ClassJobCategory>().GetRowOrDefault(item.Value.ClassJobCategory.RowId);
+            var isCraftingGear = jobs is not null && (jobs.Value.CRP || jobs.Value.BSM || jobs.Value.ARM
+                || jobs.Value.GSM || jobs.Value.LTW || jobs.Value.WVR || jobs.Value.ALC || jobs.Value.CUL);
             result.Add(new InventoryGear(slot.BaseItemId, item.Value.Name.ExtractText(), bag,
                 slot.InventorySlot, slot.IsHq, slot.MateriaEntries.Count(x => x.Type.RowId != 0),
-                item.Value.MateriaSlotCount, item.Value.IsAdvancedMeldingPermitted));
+                item.Value.MateriaSlotCount, item.Value.IsAdvancedMeldingPermitted, isCraftingGear));
         }
         return result.OrderBy(x => x.Name).ThenBy(x => x.Container).ThenBy(x => x.Slot).ToList();
     }

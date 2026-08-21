@@ -1,6 +1,6 @@
 namespace PentaPenta.Melding;
 
-internal enum MeldStat { CriticalHit, DirectHit, Determination }
+internal enum MeldStat { CriticalHit, DirectHit, Determination, Craftsmanship, Cp, Control }
 
 internal sealed record MateriaChoice(MeldStat Stat, uint Grade11ItemId, uint Grade12ItemId, int Grade11Gain, int Grade12Gain);
 
@@ -12,6 +12,15 @@ internal static class MeldPlan
         new(MeldStat.DirectHit, 41758, 41771, 18, 54),
         new(MeldStat.Determination, 41760, 41773, 18, 54),
     ];
+
+    public static readonly MateriaChoice[] CraftingPriority =
+    [
+        new(MeldStat.Craftsmanship, 41765, 41778, 22, 33),
+        new(MeldStat.Cp, 41766, 41779, 9, 11),
+        new(MeldStat.Control, 41767, 41780, 15, 23),
+    ];
+
+    public static MateriaChoice[] PriorityFor(bool crafting) => crafting ? CraftingPriority : Priority;
 
     // Current-grade materia can be used in every native slot plus the first
     // advanced slot. Later advanced slots require the previous grade.
