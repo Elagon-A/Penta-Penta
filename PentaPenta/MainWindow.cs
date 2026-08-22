@@ -337,11 +337,17 @@ internal sealed class MainWindow : Window
                 foreach (var listing in capture.Listings)
                 {
                     var proposal = FindProposal(listing);
+                    var selected = selectedRepriceSlot == listing.MarketSlot;
                     ImGui.TableNextRow();
+                    if (selected)
+                    {
+                        var selectedRowColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.75f, 0.08f, 0.08f, 0.52f));
+                        ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, selectedRowColor);
+                        ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg1, selectedRowColor);
+                    }
                     ImGui.TableNextColumn();
                     var canSelect = proposal is > 0 && (ulong)proposal.Value != listing.CurrentPrice;
                     if (!canSelect) ImGui.BeginDisabled();
-                    var selected = selectedRepriceSlot == listing.MarketSlot;
                     if (ImGui.RadioButton($"##reprice-{listing.MarketSlot}", selected)) selectedRepriceSlot = listing.MarketSlot;
                     if (!canSelect) ImGui.EndDisabled();
                     ImGui.TableNextColumn(); ImGui.TextUnformatted(listing.Name + (listing.Hq ? " ★" : ""));

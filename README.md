@@ -42,6 +42,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - A read-only active-retainer capture reads the loaded Items for Sale inventory, verifies watched item identity, quality, and 5/5 materia, and displays current versus proposed prices without clicking the retainer UI.
 - A manually armed single-listing repricing test revalidates the open sale window, market slot, item identity, quality, 5/5 materia, unchanged current price, valid proposal, and maximum decrease before submitting one price and reading it back for confirmation.
 - A manually armed one-retainer sweep processes captured changed proposals one at a time, verifies every write before continuing, waits between submissions, skips unchanged or missing proposals, and stops on the first mismatch, rejection, or timeout.
+- The active single-listing radio selection highlights its full captured retainer row in red for visibility before an armed price change.
 - Eligible inventory gear has a **Pentameld** context-menu action that opens PentaPenta with the exact bag/slot selected.
 - Preparing a queue opens the Materia Melding window automatically when it is available.
 - Overcap rejections are cached per item and grade during a queue so later slots skip choices already proven not to fit.
