@@ -35,8 +35,8 @@ public sealed class Plugin : IDalamudPlugin
         var scanner = new InventoryScanner(services);
         controller = new Melding.MeldController(services, config);
         pricing = new PentameldPricingService();
-        autoRetainerPricing = new AutoRetainerPricingBridge(services, config, pricing);
         var retainerListings = new RetainerListingScanner(services);
+        autoRetainerPricing = new AutoRetainerPricingBridge(services, config, pricing, retainerListings);
         main = new MainWindow(services, config, scanner, controller, pricing, autoRetainerPricing, retainerListings);
         marketBoardOverlay = new MarketBoardOverlay(services, config, scanner);
         windows.AddWindow(main);

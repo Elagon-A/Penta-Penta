@@ -9,33 +9,70 @@ internal sealed class AutoRetainerPricingBridge : IDisposable
     private const string ReadyForPostprocess = "AutoRetainer.OnRetainerReadyForPostprocess";
     private const string RequestPostprocess = "AutoRetainer.RequestPostprocess";
     private const string FinishPostprocess = "AutoRetainer.FinishPostprocessRequest";
+    private const string ListTaskButtonsDraw = "AutoRetainer.OnRetainerListTaskButtonsDraw";
+    private const string ListCustomTask = "AutoRetainer.OnRetainerListCustomTask";
 
     private readonly Services services;
     private readonly Configuration config;
     private readonly PentameldPricingService pricing;
+    private readonly RetainerListingScanner retainerListings;
     private readonly Action<string> additionalTaskHandler;
     private readonly Action<string, string> readyHandler;
     private Task<IReadOnlyList<PentameldPriceResult>>? scanTask;
     private bool ownsPostprocessSlot;
     private bool requestPending;
+    private readonly Action listTaskButtonsHandler;
 
     internal string Status { get; private set; } = "Dry run disabled.";
     internal string LastRetainer { get; private set; } = "";
     internal IReadOnlyList<PentameldPriceResult> LastResults { get; private set; } = [];
     internal bool IsBusy => requestPending || ownsPostprocessSlot || scanTask is not null;
+    internal bool AutomaticListingAuditActive { get; private set; }
+    internal event Action? AutomaticListingAuditStarted;
+    internal event Action<RetainerListingCapture>? AutomaticListingAuditCaptured;
 
-    internal AutoRetainerPricingBridge(Services services, Configuration config, PentameldPricingService pricing)
+    internal AutoRetainerPricingBridge(Services services, Configuration config, PentameldPricingService pricing, RetainerListingScanner retainerListings)
     {
         this.services = services;
         this.config = config;
         this.pricing = pricing;
+        this.retainerListings = retainerListings;
         additionalTaskHandler = OnAdditionalTask;
         readyHandler = OnReadyForPostprocess;
+        listTaskButtonsHandler = DrawAutoRetainerAuditButton;
         services.PluginInterface.GetIpcSubscriber<string, object>(AdditionalTask).Subscribe(additionalTaskHandler);
         services.PluginInterface.GetIpcSubscriber<string, string, object>(ReadyForPostprocess).Subscribe(readyHandler);
+        services.PluginInterface.GetIpcSubscriber<object>(ListTaskButtonsDraw).Subscribe(listTaskButtonsHandler);
         services.Framework.Update += OnFrameworkUpdate;
         if (config.EnableAutoRetainerPricingDryRun)
             Status = "Waiting for AutoRetainer to process a retainer.";
+    }
+
+    internal void CompleteAutomaticListingAudit()
+    {
+        AutomaticListingAuditActive = false;
+    }
+
+    private void DrawAutoRetainerAuditButton()
+    {
+        var disabled = AutomaticListingAuditActive || IsBusy;
+        if (disabled) Dalamud.Bindings.ImGui.ImGui.BeginDisabled();
+        if (Dalamud.Bindings.ImGui.ImGui.Button("Audit pentameld listings###PentaPentaAutoAudit"))
+        {
+            AutomaticListingAuditActive = true;
+            AutomaticListingAuditStarted?.Invoke();
+            try
+            {
+                services.PluginInterface.GetIpcSubscriber<string, object>(ListCustomTask).InvokeAction(PluginName);
+                Status = "AutoRetainer listing audit requested.";
+            }
+            catch (Exception ex)
+            {
+                AutomaticListingAuditActive = false;
+                Status = $"Could not start AutoRetainer listing audit: {ex.Message}";
+            }
+        }
+        if (disabled) Dalamud.Bindings.ImGui.ImGui.EndDisabled();
     }
 
     internal void ConfigurationChanged()
@@ -63,7 +100,7 @@ internal sealed class AutoRetainerPricingBridge : IDisposable
 
     private void OnAdditionalTask(string retainerName)
     {
-        if (!config.EnableAutoRetainerPricingDryRun || config.PentameldPricingWatchList.Count == 0 || requestPending || ownsPostprocessSlot || scanTask is not null)
+        if ((!config.EnableAutoRetainerPricingDryRun && !AutomaticListingAuditActive) || config.PentameldPricingWatchList.Count == 0 || requestPending || ownsPostprocessSlot || scanTask is not null)
             return;
         try
         {
@@ -84,7 +121,13 @@ internal sealed class AutoRetainerPricingBridge : IDisposable
         if (!string.Equals(pluginName, PluginName, StringComparison.Ordinal)) return;
         requestPending = false;
         ownsPostprocessSlot = true;
-        StartScan(retainerName, retainerName);
+        if (AutomaticListingAuditActive)
+        {
+            var capture = retainerListings.CaptureLoadedActiveRetainer(config.PentameldPricingWatchList);
+            AutomaticListingAuditCaptured?.Invoke(capture);
+        }
+        if (config.EnableAutoRetainerPricingDryRun) StartScan(retainerName, retainerName);
+        else Finish();
     }
 
     private void StartScan(string displayName, string? activeRetainer)
@@ -154,6 +197,7 @@ internal sealed class AutoRetainerPricingBridge : IDisposable
         services.Framework.Update -= OnFrameworkUpdate;
         services.PluginInterface.GetIpcSubscriber<string, object>(AdditionalTask).Unsubscribe(additionalTaskHandler);
         services.PluginInterface.GetIpcSubscriber<string, string, object>(ReadyForPostprocess).Unsubscribe(readyHandler);
+        services.PluginInterface.GetIpcSubscriber<object>(ListTaskButtonsDraw).Unsubscribe(listTaskButtonsHandler);
         Finish();
     }
 }

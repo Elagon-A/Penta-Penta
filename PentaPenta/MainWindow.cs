@@ -52,6 +52,7 @@ internal sealed class MainWindow : Window
     private string retainerSweepStatus = "";
     private bool listingAuditActive;
     private readonly Dictionary<string, IReadOnlyList<CapturedRetainerListing>> listingAuditSnapshots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<(uint ItemId, bool Hq)> listingAuditCharacterItems = [];
     private string listingAuditStatus = "Start a fresh audit, then capture each retainer's Items for Sale window.";
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings)
@@ -64,6 +65,8 @@ internal sealed class MainWindow : Window
             .Where(x => x.Name.Length > 0)
             .OrderBy(x => x.Name)
             .ToList();
+        autoRetainerPricing.AutomaticListingAuditStarted += StartAutomaticListingAudit;
+        autoRetainerPricing.AutomaticListingAuditCaptured += RecordListingAuditCapture;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 500), MaximumSize = new Vector2(float.MaxValue) };
         Refresh();
     }
@@ -446,16 +449,13 @@ internal sealed class MainWindow : Window
     {
         if (!ImGui.CollapsingHeader("Missing / recraft audit")) return;
         if (ImGui.Button(listingAuditActive ? "Restart audit" : "Start fresh audit"))
-        {
-            listingAuditSnapshots.Clear();
-            listingAuditActive = true;
-            listingAuditStatus = "Audit started. Open each retainer's Items for Sale window and click Capture open retainer listings.";
-        }
+            StartListingAudit(false);
         ImGui.SameLine();
         if (!listingAuditActive) ImGui.BeginDisabled();
         if (ImGui.Button("Finish audit"))
         {
             listingAuditActive = false;
+            autoRetainerPricing.CompleteAutomaticListingAudit();
             listingAuditStatus = "Audit finished. The missing table reflects the captured retainers below.";
         }
         if (!listingAuditActive) ImGui.EndDisabled();
@@ -466,6 +466,7 @@ internal sealed class MainWindow : Window
             .ToList();
         var expectedCaptured = expectedNames.Count(x => listingAuditSnapshots.ContainsKey(x));
         ImGui.TextWrapped(listingAuditStatus);
+        ImGui.TextDisabled("For automatic cycling, open AutoRetainer's retainer list and click Audit pentameld listings.");
         ImGui.TextUnformatted(expectedNames.Count > 0
             ? $"Retainers captured: {expectedCaptured}/{expectedNames.Count} configured ({listingAuditSnapshots.Count} total snapshots)"
             : $"Retainers captured: {listingAuditSnapshots.Count}. Add own-retainer names above to track audit completeness.");
@@ -478,6 +479,7 @@ internal sealed class MainWindow : Window
             .SelectMany(x => x)
             .Select(x => (x.ItemId, x.Hq))
             .ToHashSet();
+        present.UnionWith(listingAuditCharacterItems);
         var missing = config.PentameldPricingWatchList
             .Where(x => !present.Contains((x.ItemId, x.Hq)))
             .OrderBy(x => x.Name)
@@ -485,6 +487,7 @@ internal sealed class MainWindow : Window
         var complete = expectedNames.Count > 0 && expectedCaptured == expectedNames.Count;
         if (!complete)
             ImGui.TextColored(new Vector4(1f, 0.75f, 0.25f, 1f), "PRELIMINARY: uncaptured retainers can make items appear missing.");
+        ImGui.TextUnformatted($"Character bags contain {listingAuditCharacterItems.Count} watched item type(s)." );
         ImGui.TextUnformatted($"Missing / recraft candidates: {missing.Count} of {config.PentameldPricingWatchList.Count} watched item(s)");
         if (missing.Count == 0) return;
         if (!ImGui.BeginTable("missing-recraft-items", 2,
@@ -507,6 +510,33 @@ internal sealed class MainWindow : Window
         if (!listingAuditActive || capture.RetainerName.Length == 0) return;
         listingAuditSnapshots[capture.RetainerName] = capture.Listings.ToList();
         listingAuditStatus = $"Recorded {capture.RetainerName}: {capture.Listings.Count} watched pentamelded listing(s).";
+        var expectedNames = config.PentameldPricingOwnRetainers
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (autoRetainerPricing.AutomaticListingAuditActive
+            && expectedNames.Count > 0
+            && expectedNames.All(x => listingAuditSnapshots.ContainsKey(x)))
+        {
+            listingAuditActive = false;
+            autoRetainerPricing.CompleteAutomaticListingAudit();
+            listingAuditStatus = $"AUTOMATIC AUDIT COMPLETE: captured all {expectedNames.Count} configured retainers and character inventory.";
+        }
+    }
+
+    private void StartAutomaticListingAudit() => StartListingAudit(true);
+
+    private void StartListingAudit(bool automatic)
+    {
+        listingAuditSnapshots.Clear();
+        listingAuditCharacterItems.Clear();
+        var watched = config.PentameldPricingWatchList.Select(x => (x.ItemId, x.Hq)).ToHashSet();
+        foreach (var item in scanner.Scan())
+            if (watched.Contains((item.ItemId, item.Hq))) listingAuditCharacterItems.Add((item.ItemId, item.Hq));
+        listingAuditActive = true;
+        listingAuditStatus = automatic
+            ? $"Automatic audit started through AutoRetainer. Character bags contain {listingAuditCharacterItems.Count} watched item type(s)."
+            : $"Audit started. Character bags contain {listingAuditCharacterItems.Count} watched item type(s). Open each retainer's Items for Sale window and capture it.";
     }
 
     private void DrawSingleRepriceControls(RetainerListingCapture capture)

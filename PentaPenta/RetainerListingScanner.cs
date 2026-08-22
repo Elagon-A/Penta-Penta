@@ -6,8 +6,14 @@ namespace PentaPenta;
 internal sealed class RetainerListingScanner(Services services)
 {
     internal unsafe RetainerListingCapture Capture(IReadOnlyList<PentameldPricingWatchItem> watchList)
+        => CaptureLoaded(watchList, true);
+
+    internal unsafe RetainerListingCapture CaptureLoadedActiveRetainer(IReadOnlyList<PentameldPricingWatchItem> watchList)
+        => CaptureLoaded(watchList, false);
+
+    private unsafe RetainerListingCapture CaptureLoaded(IReadOnlyList<PentameldPricingWatchItem> watchList, bool requireSaleWindow)
     {
-        if (services.GameGui.GetAddonByName("RetainerSellList").IsNull)
+        if (requireSaleWindow && services.GameGui.GetAddonByName("RetainerSellList").IsNull)
             return new RetainerListingCapture("", [], 0, "Open a retainer's Items for Sale window before capturing.");
 
         var manager = InventoryManager.Instance();
