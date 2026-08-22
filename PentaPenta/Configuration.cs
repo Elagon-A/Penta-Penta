@@ -15,6 +15,7 @@ public sealed class Configuration : IPluginConfiguration
     public List<PentameldPricingWatchItem> PentameldPricingWatchList { get; set; } = [];
     public int PentameldPricingUndercutGil { get; set; } = 1;
     public string PentameldPricingOwnRetainers { get; set; } = "";
+    public bool EnableAutoRetainerPricingDryRun { get; set; }
 }
 
 public sealed record QueuedItem(uint ItemId, string Name, int Container, uint Slot, bool Hq);

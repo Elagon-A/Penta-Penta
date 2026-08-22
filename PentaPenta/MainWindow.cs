@@ -19,6 +19,7 @@ internal sealed class MainWindow : Window
     private readonly InventoryScanner scanner;
     private readonly MeldController controller;
     private readonly PentameldPricingService pricing;
+    private readonly AutoRetainerPricingBridge autoRetainerPricing;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private List<MateriaStock> materiaStock = [];
@@ -32,10 +33,10 @@ internal sealed class MainWindow : Window
     private IReadOnlyList<PentameldPriceResult> pricingResults = [];
     private string pricingStatus = "Add checked queue items, then refresh prices.";
 
-    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing)
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing)
         : base("PentaPenta###PentaPentaMain")
     {
-        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing;
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 500), MaximumSize = new Vector2(float.MaxValue) };
         Refresh();
     }
@@ -231,6 +232,35 @@ internal sealed class MainWindow : Window
             SaveConfig();
         }
         ImGui.TextDisabled(pricingStatus);
+
+        ImGui.Separator();
+        var dryRun = config.EnableAutoRetainerPricingDryRun;
+        if (ImGui.Checkbox("Enable AutoRetainer pricing dry run", ref dryRun))
+        {
+            config.EnableAutoRetainerPricingDryRun = dryRun;
+            SaveConfig();
+            autoRetainerPricing.ConfigurationChanged();
+        }
+        ImGui.TextDisabled("During AutoRetainer post-processing, calculate proposals for watched items without changing prices.");
+        ImGui.TextWrapped($"AutoRetainer: {autoRetainerPricing.Status}");
+        if (autoRetainerPricing.LastResults.Count > 0)
+        {
+            if (ImGui.BeginTable("autoretainer-dry-run", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH))
+            {
+                ImGui.TableSetupColumn($"Last retainer: {autoRetainerPricing.LastRetainer}");
+                ImGui.TableSetupColumn("Matches", ImGuiTableColumnFlags.WidthFixed, 70);
+                ImGui.TableSetupColumn("Proposed", ImGuiTableColumnFlags.WidthFixed, 110);
+                ImGui.TableHeadersRow();
+                foreach (var result in autoRetainerPricing.LastResults)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted(result.Name + (result.Hq ? " ★" : ""));
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted(result.Error is null ? result.QualifyingListings.ToString("N0") : "Error");
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted(FormatGil(result.ProposedPrice));
+                }
+                ImGui.EndTable();
+            }
+        }
 
         uint? removeItemId = null;
         bool removeHq = false;

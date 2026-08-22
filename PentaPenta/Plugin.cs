@@ -14,6 +14,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly MarketBoardOverlay marketBoardOverlay;
     private readonly Melding.MeldController controller;
     private readonly PentameldPricingService pricing;
+    private readonly AutoRetainerPricingBridge autoRetainerPricing;
 
     public Plugin(
         IDalamudPluginInterface pi,
@@ -34,7 +35,8 @@ public sealed class Plugin : IDalamudPlugin
         var scanner = new InventoryScanner(services);
         controller = new Melding.MeldController(services, config);
         pricing = new PentameldPricingService();
-        main = new MainWindow(services, config, scanner, controller, pricing);
+        autoRetainerPricing = new AutoRetainerPricingBridge(services, config, pricing);
+        main = new MainWindow(services, config, scanner, controller, pricing, autoRetainerPricing);
         marketBoardOverlay = new MarketBoardOverlay(services, config, scanner);
         windows.AddWindow(main);
         windows.AddWindow(marketBoardOverlay);
@@ -52,6 +54,7 @@ public sealed class Plugin : IDalamudPlugin
         services.PluginInterface.UiBuilder.OpenMainUi -= main.Toggle;
         windows.RemoveAllWindows();
         controller.Dispose();
+        autoRetainerPricing.Dispose();
         pricing.Dispose();
         marketBoardOverlay.Dispose();
     }
