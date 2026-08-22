@@ -239,10 +239,28 @@ internal sealed class MainWindow : Window
             }
             else
             {
-                var matches = pricingCatalog
+                var allMatches = pricingCatalog
                     .Where(x => x.Name.Contains(pricingItemSearch.Trim(), StringComparison.OrdinalIgnoreCase))
-                    .Take(30)
                     .ToList();
+                if (allMatches.Count > 0)
+                {
+                    if (ImGui.Button($"Add all {allMatches.Count} filtered ({(pricingPickerHq ? "HQ" : "NQ")})"))
+                    {
+                        var added = 0;
+                        foreach (var item in allMatches)
+                        {
+                            if (config.PentameldPricingWatchList.Any(x => x.ItemId == item.ItemId && x.Hq == pricingPickerHq)) continue;
+                            config.PentameldPricingWatchList.Add(new PentameldPricingWatchItem
+                                { ItemId = item.ItemId, Name = item.Name, Hq = pricingPickerHq });
+                            added++;
+                        }
+                        if (added > 0) SaveConfig();
+                        pricingPickerStatus = $"Added {added} of {allMatches.Count} filtered item(s); duplicates were skipped.";
+                    }
+                    ImGui.SameLine();
+                    ImGui.TextDisabled($"Showing the first {Math.Min(30, allMatches.Count)} result(s).");
+                }
+                var matches = allMatches.Take(30).ToList();
                 if (ImGui.BeginTable("pricing-item-picker", 2,
                         ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY,
                         new Vector2(0, 150)))
