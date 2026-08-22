@@ -5,14 +5,15 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 ## Current state
 
 - Inventory picker distinguishes duplicate items by container and slot.
-- Queue controls can select or clear every eligible inventory item in one click.
+- `Select all` makes the queue match the active inventory filter exactly; with no filter it selects every eligible item.
 - Queue persists across reloads and processes distinct-name items sequentially.
 - Default plan is Critical Hit → Direct Hit → Determination.
 - DoH equipment without an enabled exact preset defaults to Craftsmanship → CP → Control; exact five-slot presets still take precedence.
 - Grade XII is used for an item's native slots plus its first overmeld; later slots use grade XI. This means XII in slots 1–3 for normal two-slot gear and slots 1–2 for one-slot accessories.
 - Strict no-overcap, inventory identity, combat, login, window, timeout, and materia-quantity gates are enforced.
 - A stalled queue automatically reconciles the live item state and retries safely up to three times before stopping for inspection.
-- Bulk overmeld recovery shows live materia consumption, extends its wait while attempts are progressing, and retries the same verified slot after at least 15 seconds of inactivity.
+- Bulk overmeld recovery shows live materia consumption and extends its wait while attempts are progressing.
+- Fast bulk recovery uses an 8-second quiet threshold and two inventory snapshots one second apart before retrying; any resumed activity cancels the retry.
 - Exact crafting presets can be disabled temporarily without erasing their saved five-slot plan.
 - Exact crafting presets allow a positive partial stat gain when the selected materia intentionally reaches an item's cap; zero-gain melds are still rejected.
 - A nearby-marketboard overlay shows grade XI/XII battle and crafting materia stock and opens a clicked materia's native market listings.

@@ -47,6 +47,9 @@ internal sealed class MeldController : IDisposable
     private int startingMeldCount;
     private int autoLastMateriaCount;
     private DateTime autoLastProgressAt;
+    private int autoRecoveryCheckMelds;
+    private int autoRecoveryCheckMateria;
+    private bool autoRecoveryVerified;
     private AutoPhase autoPhase;
     private DateTime autoNextAction;
     private DateTime autoDeadline;
@@ -133,6 +136,7 @@ internal sealed class MeldController : IDisposable
 
         autoCandidateIndex = 0;
         autoRecoveryAttempts = 0;
+        autoRecoveryVerified = false;
         autoTotalMelds = liveMeldCounts.Sum(x => Math.Max(0, 5 - x));
         autoCompletedMelds = 0;
         autoMateriaConsumed = 0;
@@ -453,6 +457,7 @@ internal sealed class MeldController : IDisposable
                 startingMateriaCount = CountItem(pendingMateriaId);
                 autoLastMateriaCount = startingMateriaCount;
                 autoLastProgressAt = DateTime.UtcNow;
+                autoRecoveryVerified = false;
                 if (currentMelds < expected.MateriaSlotCount)
                 {
                     FireInts(detail, 0, 0, 0);
@@ -476,7 +481,7 @@ internal sealed class MeldController : IDisposable
                 FireInts(yesno, 0);
                 autoPhase = AutoPhase.Monitoring;
                 autoLastProgressAt = DateTime.UtcNow;
-                autoDeadline = DateTime.UtcNow.AddSeconds(30);
+                autoDeadline = DateTime.UtcNow.AddSeconds(15);
                 Status = $"Bulk advanced meld running for slot {startingMeldCount + 1}...";
                 break;
             }
@@ -487,7 +492,7 @@ internal sealed class MeldController : IDisposable
                 {
                     autoLastMateriaCount = count;
                     autoLastProgressAt = DateTime.UtcNow;
-                    autoDeadline = DateTime.UtcNow.AddSeconds(20);
+                    autoDeadline = DateTime.UtcNow.AddSeconds(10);
                     var attempted = Math.Max(0, startingMateriaCount - count);
                     Status = $"Slot {startingMeldCount + 1}: bulk meld active; {attempted} materia consumed this attempt...";
                 }
@@ -513,6 +518,27 @@ internal sealed class MeldController : IDisposable
                 autoCandidateIndex = 0;
                 autoPhase = AutoPhase.SelectEquipment;
                 autoDeadline = DateTime.UtcNow.AddSeconds(15);
+                break;
+            }
+            case AutoPhase.RecoveryVerify:
+            {
+                var verifyMelds = CurrentMeldCount(expected);
+                var verifyMateria = CountItem(pendingMateriaId);
+                if (verifyMelds < 0)
+                { StopAutomaticWithError("Queued inventory slot changed during recovery verification."); return; }
+                if (verifyMelds != autoRecoveryCheckMelds || verifyMateria != autoRecoveryCheckMateria)
+                {
+                    autoPhase = AutoPhase.Monitoring;
+                    autoLastMateriaCount = verifyMateria;
+                    autoLastProgressAt = DateTime.UtcNow;
+                    autoDeadline = DateTime.UtcNow.AddSeconds(10);
+                    Status = "Recovery cancelled: meld activity resumed during the final safety check.";
+                    return;
+                }
+                autoRecoveryVerified = true;
+                autoPhase = AutoPhase.Monitoring;
+                autoDeadline = DateTime.UtcNow.AddMilliseconds(-1);
+                Status = "Stall verified twice; preparing a safe retry...";
                 break;
             }
         }
@@ -567,14 +593,25 @@ internal sealed class MeldController : IDisposable
         {
             var currentCount = CountItem(pendingMateriaId);
             var quietFor = DateTime.UtcNow - autoLastProgressAt;
-            if (currentCount != autoLastMateriaCount || quietFor < TimeSpan.FromSeconds(15))
+            if (currentCount != autoLastMateriaCount || quietFor < TimeSpan.FromSeconds(8))
             {
                 autoLastMateriaCount = currentCount;
                 autoLastProgressAt = DateTime.UtcNow;
-                autoDeadline = DateTime.UtcNow.AddSeconds(20);
+                autoDeadline = DateTime.UtcNow.AddSeconds(10);
                 Status = $"Bulk meld still active; waiting before retry ({Math.Max(0, startingMateriaCount - currentCount)} consumed)...";
                 return;
             }
+            if (!autoRecoveryVerified)
+            {
+                autoRecoveryCheckMelds = currentMelds;
+                autoRecoveryCheckMateria = currentCount;
+                autoPhase = AutoPhase.RecoveryVerify;
+                autoNextAction = DateTime.UtcNow.AddSeconds(1);
+                autoDeadline = DateTime.UtcNow.AddSeconds(4);
+                Status = $"No progress for {quietFor.TotalSeconds:F0}s; verifying once more before retry...";
+                return;
+            }
+            autoRecoveryVerified = false;
             var recoveredUsed = Math.Max(0, startingMateriaCount - currentCount);
             autoMateriaConsumed += recoveredUsed;
             RecordMateriaHistory(pendingMateriaId, recoveredUsed);
@@ -600,6 +637,7 @@ internal sealed class MeldController : IDisposable
         autoMateriaConsumed += used;
         RecordMateriaHistory(pendingMateriaId, used);
         autoRecoveryAttempts = 0;
+        autoRecoveryVerified = false;
         Status = $"Slot {currentMelds} succeeded with {autoMateriaName}; {used} consumed.";
         autoPhase = AutoPhase.WaitReturn;
         autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
@@ -705,5 +743,5 @@ internal sealed class MeldController : IDisposable
     private void Fail(string message) { State = RunState.Error; Status = message; services.Log.Warning(message); }
 
     private enum AdvancedPhase { None, WaitingForConfirmation, Monitoring }
-    private enum AutoPhase { None, SelectEquipment, ChooseCandidate, WaitDetail, WaitYesNo, Monitoring, WaitReturn }
+    private enum AutoPhase { None, SelectEquipment, ChooseCandidate, WaitDetail, WaitYesNo, Monitoring, RecoveryVerify, WaitReturn }
 }

@@ -62,7 +62,7 @@ internal sealed class MainWindow : Window
         if (ImGui.Button("Select all"))
         {
             selected.Clear();
-            foreach (var item in gear) selected.Add(Key(item));
+            foreach (var item in gear.Where(MatchesFilter)) selected.Add(Key(item));
             SaveQueue();
         }
         ImGui.SameLine();
@@ -80,7 +80,7 @@ internal sealed class MainWindow : Window
             ImGui.TableSetupColumn("Item"); ImGui.TableSetupColumn("Location");
             ImGui.TableSetupColumn("Melds", ImGuiTableColumnFlags.WidthFixed, 60);
             ImGui.TableSetupColumn("Overmeld", ImGuiTableColumnFlags.WidthFixed, 75); ImGui.TableHeadersRow();
-            foreach (var item in gear.Where(x => filter.Length == 0 || x.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)))
+            foreach (var item in gear.Where(MatchesFilter))
             {
                 var key = Key(item); var check = selected.Contains(key);
                 ImGui.PushID(key); ImGui.TableNextRow(); ImGui.TableNextColumn();
@@ -312,6 +312,8 @@ internal sealed class MainWindow : Window
         services.PluginInterface.SavePluginConfig(config);
     }
     private static string Key(InventoryGear x) => $"{(int)x.Container}:{x.Slot}:{x.ItemId}:{x.Hq}";
+    private bool MatchesFilter(InventoryGear item) => filter.Length == 0
+        || item.Name.Contains(filter, StringComparison.OrdinalIgnoreCase);
     private static string FormatDuration(TimeSpan value) => value.TotalHours >= 1
         ? $"{(int)value.TotalHours}:{value.Minutes:00}:{value.Seconds:00}"
         : $"{(int)value.TotalMinutes}:{value.Seconds:00}";
