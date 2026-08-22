@@ -338,15 +338,15 @@ internal sealed class MainWindow : Window
                 {
                     var proposal = FindProposal(listing);
                     var selected = selectedRepriceSlot == listing.MarketSlot;
+                    var canSelect = proposal is > 0 && (ulong)proposal.Value != listing.CurrentPrice;
                     ImGui.TableNextRow();
-                    if (selected)
+                    if (canSelect)
                     {
-                        var selectedRowColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.75f, 0.08f, 0.08f, 0.52f));
-                        ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, selectedRowColor);
-                        ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg1, selectedRowColor);
+                        var needsChangeColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.75f, 0.08f, 0.08f, 0.42f));
+                        ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, needsChangeColor);
+                        ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg1, needsChangeColor);
                     }
                     ImGui.TableNextColumn();
-                    var canSelect = proposal is > 0 && (ulong)proposal.Value != listing.CurrentPrice;
                     if (!canSelect) ImGui.BeginDisabled();
                     if (ImGui.RadioButton($"##reprice-{listing.MarketSlot}", selected)) selectedRepriceSlot = listing.MarketSlot;
                     if (!canSelect) ImGui.EndDisabled();
