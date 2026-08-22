@@ -46,6 +46,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - A session-based Missing / Recraft audit aggregates watched HQ/NQ 5/5 listings across individually captured retainers, tracks configured-retainer coverage, warns while the audit is incomplete, and lists watched items absent from every captured sale list.
 - Missing/recraft audits also snapshot watched HQ/NQ equipment in the four character bags regardless of meld count, preventing owned unfinished pieces from being reported as recraft candidates.
 - AutoRetainer's retainer-list task area includes an Audit pentameld listings action that uses the supported custom-task post-process cycle to capture every configured retainer automatically without opening each sale list manually.
+- The main UI is organized into Queue, Pricing, Recraft Audit, and Materia History tabs; Pricing hides correctly priced listings by default, collapses watchlist management and diagnostics, and Recraft Audit owns coverage summaries and missing-item filtering.
 - Eligible inventory gear has a **Pentameld** context-menu action that opens PentaPenta with the exact bag/slot selected.
 - Preparing a queue opens the Materia Melding window automatically when it is available.
 - Overcap rejections are cached per item and grade during a queue so later slots skip choices already proven not to fit.

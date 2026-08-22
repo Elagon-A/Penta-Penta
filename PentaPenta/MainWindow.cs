@@ -54,6 +54,9 @@ internal sealed class MainWindow : Window
     private readonly Dictionary<string, IReadOnlyList<CapturedRetainerListing>> listingAuditSnapshots = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<(uint ItemId, bool Hq)> listingAuditCharacterItems = [];
     private string listingAuditStatus = "Start a fresh audit, then capture each retainer's Items for Sale window.";
+    private bool showCorrectlyPriced;
+    private string watchlistFilter = "";
+    private string missingItemsFilter = "";
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings)
         : base("PentaPenta###PentaPentaMain")
@@ -80,14 +83,19 @@ internal sealed class MainWindow : Window
             DrawQueueTab();
             ImGui.EndTabItem();
         }
+        if (ImGui.BeginTabItem("Pricing"))
+        {
+            DrawPentameldPricing();
+            ImGui.EndTabItem();
+        }
+        if (ImGui.BeginTabItem("Recraft Audit"))
+        {
+            DrawListingCoverageAudit();
+            ImGui.EndTabItem();
+        }
         if (ImGui.BeginTabItem("Materia History"))
         {
             DrawMateriaHistory();
-            ImGui.EndTabItem();
-        }
-        if (ImGui.BeginTabItem("Pentameld Pricing"))
-        {
-            DrawPentameldPricing();
             ImGui.EndTabItem();
         }
         ImGui.EndTabBar();
@@ -230,10 +238,26 @@ internal sealed class MainWindow : Window
         PollPricingScan();
         PollPendingPriceVerification();
         AdvanceRetainerSweep();
-        ImGui.TextWrapped("Read-only market comparison. A qualifying competitor is the same item and quality with exactly five materia; materia types and grades may differ.");
-        ImGui.TextDisabled("This tab does not invoke AutoRetainer or change any sale price. Universalis data may be several minutes old.");
+        ImGui.TextWrapped("Compare captured 5/5 retainer listings, review red rows that need attention, then run a manually armed retainer sweep.");
+        ImGui.TextDisabled("Competitors must match item and quality with exactly five materia. Universalis prices may be several minutes old.");
         ImGui.Separator();
 
+        var scanRunning = pricingScanTask is { IsCompleted: false };
+        if (scanRunning || config.PentameldPricingWatchList.Count == 0) ImGui.BeginDisabled();
+        if (ImGui.Button(scanRunning ? "Refreshing..." : "Refresh market prices")) StartPricingScan();
+        if (scanRunning || config.PentameldPricingWatchList.Count == 0) ImGui.EndDisabled();
+        ImGui.SameLine();
+        if (ImGui.Button("Capture open retainer"))
+        {
+            retainerCapture = retainerListings.Capture(config.PentameldPricingWatchList);
+            RecordListingAuditCapture(retainerCapture);
+        }
+        ImGui.SameLine();
+        ImGui.Checkbox("Show correctly priced", ref showCorrectlyPriced);
+        ImGui.TextDisabled(pricingStatus);
+
+        if (ImGui.CollapsingHeader($"Add items & settings ({config.PentameldPricingWatchList.Count} watched)"))
+        {
         if (ImGui.Button("Add checked queue items"))
         {
             foreach (var item in gear.Where(x => selected.Contains(Key(x))))
@@ -243,11 +267,6 @@ internal sealed class MainWindow : Window
             }
             SaveConfig();
         }
-        ImGui.SameLine();
-        var scanRunning = pricingScanTask is { IsCompleted: false };
-        if (scanRunning || config.PentameldPricingWatchList.Count == 0) ImGui.BeginDisabled();
-        if (ImGui.Button(scanRunning ? "Refreshing..." : "Refresh prices")) StartPricingScan();
-        if (scanRunning || config.PentameldPricingWatchList.Count == 0) ImGui.EndDisabled();
 
         if (ImGui.CollapsingHeader("Add an item without inventory"))
         {
@@ -319,22 +338,22 @@ internal sealed class MainWindow : Window
             config.PentameldPricingOwnRetainers = ownRetainers;
             SaveConfig();
         }
-        ImGui.TextDisabled(pricingStatus);
+        }
 
         ImGui.Separator();
-        if (ImGui.Button("Capture open retainer listings"))
-        {
-            retainerCapture = retainerListings.Capture(config.PentameldPricingWatchList);
-            RecordListingAuditCapture(retainerCapture);
-        }
-        ImGui.SameLine();
-        ImGui.TextDisabled("Read only; requires the retainer Items for Sale window.");
         if (retainerCapture is { } capture)
         {
             ImGui.TextWrapped(capture.Status);
-            if (capture.Listings.Count > 0 && ImGui.BeginTable("retainer-listing-capture", 6,
+            var visibleListings = capture.Listings.Where(listing =>
+            {
+                var proposal = FindProposal(listing);
+                return showCorrectlyPriced || proposal is > 0 && (ulong)proposal.Value != listing.CurrentPrice;
+            }).ToList();
+            if (!showCorrectlyPriced)
+                ImGui.TextDisabled($"Showing {visibleListings.Count} listing(s) needing a price change; {capture.Listings.Count - visibleListings.Count} hidden.");
+            if (visibleListings.Count > 0 && ImGui.BeginTable("retainer-listing-capture", 6,
                     ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY,
-                    new Vector2(0, Math.Min(180, 28 + capture.Listings.Count * 24))))
+                    new Vector2(0, Math.Min(240, 28 + visibleListings.Count * 24))))
             {
                 ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 28);
                 ImGui.TableSetupColumn("Active retainer listing");
@@ -343,7 +362,7 @@ internal sealed class MainWindow : Window
                 ImGui.TableSetupColumn("Current", ImGuiTableColumnFlags.WidthFixed, 110);
                 ImGui.TableSetupColumn("Proposed", ImGuiTableColumnFlags.WidthFixed, 110);
                 ImGui.TableHeadersRow();
-                foreach (var listing in capture.Listings)
+                foreach (var listing in visibleListings)
                 {
                     var proposal = FindProposal(listing);
                     var selected = selectedRepriceSlot == listing.MarketSlot;
@@ -367,51 +386,27 @@ internal sealed class MainWindow : Window
                 }
                 ImGui.EndTable();
             }
-            DrawSingleRepriceControls(capture);
             DrawRetainerSweepControls(capture);
+            if (ImGui.CollapsingHeader("Advanced / single-item repricing")) DrawSingleRepriceControls(capture);
         }
 
-        DrawListingCoverageAudit();
-
-        ImGui.Separator();
-        var dryRun = config.EnableAutoRetainerPricingDryRun;
-        if (ImGui.Checkbox("Enable AutoRetainer pricing dry run", ref dryRun))
+        if (ImGui.CollapsingHeader("Advanced diagnostics"))
         {
-            config.EnableAutoRetainerPricingDryRun = dryRun;
-            SaveConfig();
-            autoRetainerPricing.ConfigurationChanged();
-        }
-        ImGui.TextDisabled("During AutoRetainer post-processing, calculate proposals for watched items without changing prices.");
-        if (autoRetainerPricing.IsBusy) ImGui.BeginDisabled();
-        if (ImGui.Button("Run dry test now")) autoRetainerPricing.RunManualDryTest();
-        if (autoRetainerPricing.IsBusy) ImGui.EndDisabled();
-        ImGui.SameLine();
-        ImGui.TextDisabled("Does not require or invoke AutoRetainer.");
-        ImGui.TextWrapped($"AutoRetainer: {autoRetainerPricing.Status}");
-        if (autoRetainerPricing.LastResults.Count > 0)
-        {
-            if (ImGui.BeginTable("autoretainer-dry-run", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH))
-            {
-                ImGui.TableSetupColumn($"Last retainer: {autoRetainerPricing.LastRetainer}");
-                ImGui.TableSetupColumn("Matches", ImGuiTableColumnFlags.WidthFixed, 70);
-                ImGui.TableSetupColumn("Proposed", ImGuiTableColumnFlags.WidthFixed, 110);
-                ImGui.TableHeadersRow();
-                foreach (var result in autoRetainerPricing.LastResults)
-                {
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn(); ImGui.TextUnformatted(result.Name + (result.Hq ? " ★" : ""));
-                    ImGui.TableNextColumn(); ImGui.TextUnformatted(result.Error is null ? result.QualifyingListings.ToString("N0") : "Error");
-                    ImGui.TableNextColumn(); ImGui.TextUnformatted(FormatGil(result.ProposedPrice));
-                }
-                ImGui.EndTable();
-            }
+            if (autoRetainerPricing.IsBusy) ImGui.BeginDisabled();
+            if (ImGui.Button("Run manual pricing dry test")) autoRetainerPricing.RunManualDryTest();
+            if (autoRetainerPricing.IsBusy) ImGui.EndDisabled();
+            ImGui.SameLine(); ImGui.TextDisabled("Troubleshooting only; does not invoke AutoRetainer or change prices.");
+            ImGui.TextWrapped(autoRetainerPricing.Status);
         }
 
+        if (!ImGui.CollapsingHeader($"Watchlist ({config.PentameldPricingWatchList.Count})")) return;
+        ImGui.SetNextItemWidth(320);
+        ImGui.InputTextWithHint("##watchlist-filter", "Filter watched items...", ref watchlistFilter, 100);
         uint? removeItemId = null;
         bool removeHq = false;
         if (ImGui.BeginTable("pentameld-pricing", 6,
                 ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY,
-                new Vector2(0, -1)))
+                new Vector2(0, 240)))
         {
             ImGui.TableSetupColumn("Item");
             ImGui.TableSetupColumn("Quality", ImGuiTableColumnFlags.WidthFixed, 65);
@@ -420,7 +415,8 @@ internal sealed class MainWindow : Window
             ImGui.TableSetupColumn("Proposed", ImGuiTableColumnFlags.WidthFixed, 100);
             ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 70);
             ImGui.TableHeadersRow();
-            foreach (var watch in config.PentameldPricingWatchList)
+            foreach (var watch in config.PentameldPricingWatchList.Where(x => watchlistFilter.Length == 0
+                         || x.Name.Contains(watchlistFilter, StringComparison.OrdinalIgnoreCase)))
             {
                 var result = pricingResults.FirstOrDefault(x => x.ItemId == watch.ItemId && x.Hq == watch.Hq);
                 ImGui.PushID($"pricing-{watch.ItemId}-{watch.Hq}");
@@ -447,8 +443,17 @@ internal sealed class MainWindow : Window
 
     private void DrawListingCoverageAudit()
     {
-        if (!ImGui.CollapsingHeader("Missing / recraft audit")) return;
-        if (ImGui.Button(listingAuditActive ? "Restart audit" : "Start fresh audit"))
+        ImGui.TextWrapped("Compare the complete pricing watchlist with your character bags and every retainer's verified 5/5 sale listings.");
+        ImGui.TextDisabled("Automatic cycling is started from AutoRetainer's retainer list with Audit pentameld listings.");
+        var auditRetainers = config.PentameldPricingOwnRetainers;
+        ImGui.SetNextItemWidth(500);
+        if (ImGui.InputTextWithHint("Retainers", "Comma-separated exact retainer names", ref auditRetainers, 500))
+        {
+            config.PentameldPricingOwnRetainers = auditRetainers;
+            SaveConfig();
+        }
+        ImGui.Separator();
+        if (ImGui.Button(listingAuditActive ? "Restart manual audit" : "Start manual audit"))
             StartListingAudit(false);
         ImGui.SameLine();
         if (!listingAuditActive) ImGui.BeginDisabled();
@@ -459,6 +464,17 @@ internal sealed class MainWindow : Window
             listingAuditStatus = "Audit finished. The missing table reflects the captured retainers below.";
         }
         if (!listingAuditActive) ImGui.EndDisabled();
+        if (autoRetainerPricing.AutomaticListingAuditActive)
+            ImGui.TextWrapped($"AutoRetainer: {autoRetainerPricing.Status}");
+        if (ImGui.CollapsingHeader("Manual capture fallback"))
+        {
+            ImGui.TextDisabled("Open one retainer's Items for Sale window, capture it, then repeat for the remaining retainers.");
+            if (ImGui.Button("Capture currently open retainer"))
+            {
+                retainerCapture = retainerListings.Capture(config.PentameldPricingWatchList);
+                RecordListingAuditCapture(retainerCapture);
+            }
+        }
 
         var expectedNames = config.PentameldPricingOwnRetainers
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -475,28 +491,33 @@ internal sealed class MainWindow : Window
             ImGui.TextDisabled(string.Join(" · ", listingAuditSnapshots.OrderBy(x => x.Key).Select(x => $"{x.Key}: {x.Value.Count}")));
         }
 
-        var present = listingAuditSnapshots.Values
+        var listedPresent = listingAuditSnapshots.Values
             .SelectMany(x => x)
             .Select(x => (x.ItemId, x.Hq))
             .ToHashSet();
+        var present = listedPresent.ToHashSet();
         present.UnionWith(listingAuditCharacterItems);
         var missing = config.PentameldPricingWatchList
             .Where(x => !present.Contains((x.ItemId, x.Hq)))
             .OrderBy(x => x.Name)
             .ToList();
+        var listedCount = listedPresent.Count;
         var complete = expectedNames.Count > 0 && expectedCaptured == expectedNames.Count;
         if (!complete)
             ImGui.TextColored(new Vector4(1f, 0.75f, 0.25f, 1f), "PRELIMINARY: uncaptured retainers can make items appear missing.");
-        ImGui.TextUnformatted($"Character bags contain {listingAuditCharacterItems.Count} watched item type(s)." );
-        ImGui.TextUnformatted($"Missing / recraft candidates: {missing.Count} of {config.PentameldPricingWatchList.Count} watched item(s)");
+        ImGui.TextUnformatted($"Watched {config.PentameldPricingWatchList.Count}   |   Listed {listedCount}   |   In bags {listingAuditCharacterItems.Count}   |   Missing {missing.Count}");
         if (missing.Count == 0) return;
+        ImGui.SetNextItemWidth(320);
+        ImGui.InputTextWithHint("##missing-filter", "Filter missing items...", ref missingItemsFilter, 100);
+        var visibleMissing = missing.Where(x => missingItemsFilter.Length == 0
+            || x.Name.Contains(missingItemsFilter, StringComparison.OrdinalIgnoreCase)).ToList();
         if (!ImGui.BeginTable("missing-recraft-items", 2,
                 ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY,
-                new Vector2(0, Math.Min(220, 28 + missing.Count * 24)))) return;
+                new Vector2(0, -1))) return;
         ImGui.TableSetupColumn("Missing watched item");
         ImGui.TableSetupColumn("Quality", ImGuiTableColumnFlags.WidthFixed, 70);
         ImGui.TableHeadersRow();
-        foreach (var item in missing)
+        foreach (var item in visibleMissing)
         {
             ImGui.TableNextRow();
             ImGui.TableNextColumn(); ImGui.TextUnformatted(item.Name);
@@ -541,13 +562,6 @@ internal sealed class MainWindow : Window
 
     private void DrawSingleRepriceControls(RetainerListingCapture capture)
     {
-        var maxDecrease = config.MaxSingleRepriceDecreasePercent;
-        ImGui.SetNextItemWidth(90);
-        if (ImGui.InputInt("Maximum decrease (%)", ref maxDecrease))
-        {
-            config.MaxSingleRepriceDecreasePercent = Math.Clamp(maxDecrease, 0, 100);
-            SaveConfig();
-        }
         var selectedListing = selectedRepriceSlot is { } slot
             ? capture.Listings.FirstOrDefault(x => x.MarketSlot == slot)
             : null;
@@ -591,6 +605,13 @@ internal sealed class MainWindow : Window
             return;
         }
 
+        var maxDecrease = config.MaxSingleRepriceDecreasePercent;
+        ImGui.SetNextItemWidth(90);
+        if (ImGui.InputInt("Maximum decrease (%)", ref maxDecrease))
+        {
+            config.MaxSingleRepriceDecreasePercent = Math.Clamp(maxDecrease, 0, 100);
+            SaveConfig();
+        }
         ImGui.Checkbox("Arm one retainer sweep", ref armRetainerSweep);
         ImGui.SameLine();
         var canStartSweep = armRetainerSweep && pendingPriceVerification is null;
