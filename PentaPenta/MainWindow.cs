@@ -32,11 +32,21 @@ internal sealed class MainWindow : Window
     private Task<IReadOnlyList<PentameldPriceResult>>? pricingScanTask;
     private IReadOnlyList<PentameldPriceResult> pricingResults = [];
     private string pricingStatus = "Add checked queue items, then refresh prices.";
+    private readonly List<PricingCatalogItem> pricingCatalog;
+    private string pricingItemSearch = "";
+    private bool pricingPickerHq = true;
+    private string pricingPickerStatus = "";
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing)
         : base("PentaPenta###PentaPentaMain")
     {
         this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing;
+        pricingCatalog = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
+            .Where(x => x.EquipSlotCategory.RowId != 0 && x.MateriaSlotCount > 0 && x.IsAdvancedMeldingPermitted)
+            .Select(x => new PricingCatalogItem(x.RowId, x.Name.ExtractText()))
+            .Where(x => x.Name.Length > 0)
+            .OrderBy(x => x.Name)
+            .ToList();
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 500), MaximumSize = new Vector2(float.MaxValue) };
         Refresh();
     }
@@ -217,6 +227,44 @@ internal sealed class MainWindow : Window
         if (ImGui.Button(scanRunning ? "Refreshing..." : "Refresh prices")) StartPricingScan();
         if (scanRunning || config.PentameldPricingWatchList.Count == 0) ImGui.EndDisabled();
 
+        if (ImGui.CollapsingHeader("Add an item without inventory"))
+        {
+            ImGui.SetNextItemWidth(360);
+            ImGui.InputTextWithHint("##pricing-item-search", "Search pentameldable equipment...", ref pricingItemSearch, 100);
+            ImGui.SameLine();
+            ImGui.Checkbox("HQ", ref pricingPickerHq);
+            if (pricingItemSearch.Trim().Length < 2)
+            {
+                ImGui.TextDisabled("Enter at least two characters.");
+            }
+            else
+            {
+                var matches = pricingCatalog
+                    .Where(x => x.Name.Contains(pricingItemSearch.Trim(), StringComparison.OrdinalIgnoreCase))
+                    .Take(30)
+                    .ToList();
+                if (ImGui.BeginTable("pricing-item-picker", 2,
+                        ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY,
+                        new Vector2(0, 150)))
+                {
+                    ImGui.TableSetupColumn("Equipment");
+                    ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 70);
+                    foreach (var item in matches)
+                    {
+                        ImGui.PushID($"catalog-{item.ItemId}");
+                        ImGui.TableNextRow();
+                        ImGui.TableNextColumn(); ImGui.TextUnformatted(item.Name);
+                        ImGui.TableNextColumn();
+                        if (ImGui.SmallButton("Add")) AddPricingWatchItem(item.ItemId, item.Name, pricingPickerHq);
+                        ImGui.PopID();
+                    }
+                    ImGui.EndTable();
+                }
+                if (matches.Count == 0) ImGui.TextDisabled("No pentameldable equipment matched that search.");
+            }
+            if (pricingPickerStatus.Length > 0) ImGui.TextDisabled(pricingPickerStatus);
+        }
+
         var undercut = config.PentameldPricingUndercutGil;
         ImGui.SetNextItemWidth(100);
         if (ImGui.InputInt("Undercut (gil)", ref undercut))
@@ -321,6 +369,18 @@ internal sealed class MainWindow : Window
             .ToList();
         pricingStatus = $"Refreshing {snapshot.Count} item(s)...";
         pricingScanTask = pricing.ScanAsync(worldId, snapshot, exclusions, config.PentameldPricingUndercutGil);
+    }
+
+    private void AddPricingWatchItem(uint itemId, string name, bool hq)
+    {
+        if (config.PentameldPricingWatchList.Any(x => x.ItemId == itemId && x.Hq == hq))
+        {
+            pricingPickerStatus = $"{name} ({(hq ? "HQ" : "NQ")}) is already watched.";
+            return;
+        }
+        config.PentameldPricingWatchList.Add(new PentameldPricingWatchItem { ItemId = itemId, Name = name, Hq = hq });
+        SaveConfig();
+        pricingPickerStatus = $"Added {name} ({(hq ? "HQ" : "NQ")}).";
     }
 
     private void PollPricingScan()
@@ -484,4 +544,6 @@ internal sealed class MainWindow : Window
         Dalamud.Game.Inventory.GameInventoryType.Inventory4 => 4,
         _ => (int)type
     };
+
+    private sealed record PricingCatalogItem(uint ItemId, string Name);
 }
