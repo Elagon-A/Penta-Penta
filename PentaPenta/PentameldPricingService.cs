@@ -42,6 +42,7 @@ internal sealed class PentameldPricingService : IDisposable
             var response = await JsonSerializer.DeserializeAsync<UniversalisResponse>(stream).ConfigureAwait(false);
             var matches = (response?.Listings ?? [])
                 .Where(x => x.Hq == item.Hq
+                    && x.UnitPrice > 0
                     && x.Materia.Count == 5
                     && !ownRetainers.Contains(x.RetainerName ?? ""))
                 .ToList();
