@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Inventory;
 using Dalamud.Interface.Windowing;
@@ -57,6 +58,7 @@ internal sealed class MainWindow : Window
     private bool showCorrectlyPriced;
     private string watchlistFilter = "";
     private string missingItemsFilter = "";
+    private string artisanExportStatus = "";
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings)
         : base("PentaPenta###PentaPentaMain")
@@ -507,6 +509,13 @@ internal sealed class MainWindow : Window
             ImGui.TextColored(new Vector4(1f, 0.75f, 0.25f, 1f), "PRELIMINARY: uncaptured retainers can make items appear missing.");
         ImGui.TextUnformatted($"Watched {config.PentameldPricingWatchList.Count}   |   Listed {listedCount}   |   In bags {listingAuditCharacterItems.Count}   |   Missing {missing.Count}");
         if (missing.Count == 0) return;
+        if (ImGui.Button("Copy missing to Artisan & open Lists"))
+            ExportMissingToArtisan(missing);
+        if (artisanExportStatus.Length > 0)
+        {
+            ImGui.SameLine();
+            ImGui.TextWrapped(artisanExportStatus);
+        }
         ImGui.SetNextItemWidth(320);
         ImGui.InputTextWithHint("##missing-filter", "Filter missing items...", ref missingItemsFilter, 100);
         var visibleMissing = missing.Where(x => missingItemsFilter.Length == 0
@@ -524,6 +533,41 @@ internal sealed class MainWindow : Window
             ImGui.TableNextColumn(); ImGui.TextUnformatted(item.Hq ? "HQ" : "NQ");
         }
         ImGui.EndTable();
+    }
+
+    private void ExportMissingToArtisan(IReadOnlyList<PentameldPricingWatchItem> missing)
+    {
+        var recipesByItem = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Recipe>()
+            .Where(x => x.ItemResult.RowId != 0)
+            .GroupBy(x => x.ItemResult.RowId)
+            .ToDictionary(x => x.Key, x => x.First().RowId);
+        var recipes = missing
+            .Where(x => recipesByItem.ContainsKey(x.ItemId))
+            .Select(x => new ArtisanListItem(recipesByItem[x.ItemId], 1, new ArtisanListItemOptions(false, false)))
+            .ToList();
+        var skipped = missing.Count - recipes.Count;
+        if (recipes.Count == 0)
+        {
+            artisanExportStatus = "No missing items have a craftable recipe.";
+            return;
+        }
+
+        var export = new ArtisanCraftingList(
+            0,
+            $"PentaPenta missing {DateTime.Now:yyyy-MM-dd HHmm}",
+            recipes,
+            [],
+            false,
+            false,
+            false,
+            false,
+            50,
+            false,
+            true,
+            false);
+        ImGui.SetClipboardText(JsonSerializer.Serialize(export));
+        services.Commands.ProcessCommand("/artisan lists");
+        artisanExportStatus = $"Copied {recipes.Count} item(s){(skipped > 0 ? $"; skipped {skipped} without recipes" : "")}. In Artisan, click Import List From Clipboard.";
     }
 
     private void RecordListingAuditCapture(RetainerListingCapture capture)
@@ -918,4 +962,19 @@ internal sealed class MainWindow : Window
     private sealed record PricingCatalogItem(uint ItemId, string Name);
     private sealed record PendingPriceVerification(CapturedRetainerListing Listing, uint ExpectedPrice, DateTime Deadline, bool IsSweep);
     private sealed record RetainerRepricePlan(CapturedRetainerListing Listing, uint ProposedPrice);
+    private sealed record ArtisanListItem(uint ID, int Quantity, ArtisanListItemOptions ListItemOptions);
+    private sealed record ArtisanListItemOptions(bool NQOnly, bool Skipping);
+    private sealed record ArtisanCraftingList(
+        int ID,
+        string Name,
+        List<ArtisanListItem> Recipes,
+        List<uint> ExpandedList,
+        bool SkipIfEnough,
+        bool SkipLiteral,
+        bool Materia,
+        bool Repair,
+        int RepairPercent,
+        bool AddAsQuickSynth,
+        bool TidyAfter,
+        bool OnlyRestockNonCrafted);
 }
