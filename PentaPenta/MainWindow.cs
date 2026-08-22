@@ -42,6 +42,14 @@ internal sealed class MainWindow : Window
     private bool armSingleReprice;
     private string singleRepriceStatus = "";
     private PendingPriceVerification? pendingPriceVerification;
+    private bool armRetainerSweep;
+    private bool retainerSweepActive;
+    private List<RetainerRepricePlan> retainerSweepPlans = [];
+    private int retainerSweepIndex;
+    private int retainerSweepChanged;
+    private int retainerSweepSkipped;
+    private DateTime retainerSweepNextAt;
+    private string retainerSweepStatus = "";
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings)
         : base("PentaPenta###PentaPentaMain")
@@ -215,6 +223,7 @@ internal sealed class MainWindow : Window
     {
         PollPricingScan();
         PollPendingPriceVerification();
+        AdvanceRetainerSweep();
         ImGui.TextWrapped("Read-only market comparison. A qualifying competitor is the same item and quality with exactly five materia; materia types and grades may differ.");
         ImGui.TextDisabled("This tab does not invoke AutoRetainer or change any sale price. Universalis data may be several minutes old.");
         ImGui.Separator();
@@ -344,6 +353,7 @@ internal sealed class MainWindow : Window
                 ImGui.EndTable();
             }
             DrawSingleRepriceControls(capture);
+            DrawRetainerSweepControls(capture);
         }
 
         ImGui.Separator();
@@ -434,7 +444,7 @@ internal sealed class MainWindow : Window
         if (selectedListing is not null)
             ImGui.TextWrapped($"Selected: {selectedListing.Name} — {selectedListing.CurrentPrice:N0} → {FormatGil(proposed)}");
 
-        var busy = pendingPriceVerification is not null;
+        var busy = pendingPriceVerification is not null || retainerSweepActive;
         if (busy) ImGui.BeginDisabled();
         ImGui.Checkbox("Arm one price change", ref armSingleReprice);
         ImGui.SameLine();
@@ -446,11 +456,103 @@ internal sealed class MainWindow : Window
             singleRepriceStatus = submission.Status;
             armSingleReprice = false;
             if (submission.Submitted)
-                pendingPriceVerification = new PendingPriceVerification(selectedListing, (uint)proposed.Value, DateTime.UtcNow.AddSeconds(10));
+                pendingPriceVerification = new PendingPriceVerification(selectedListing, (uint)proposed.Value, DateTime.UtcNow.AddSeconds(10), false);
         }
         if (!canSubmit) ImGui.EndDisabled();
         if (busy) ImGui.EndDisabled();
         if (singleRepriceStatus.Length > 0) ImGui.TextWrapped(singleRepriceStatus);
+    }
+
+    private void DrawRetainerSweepControls(RetainerListingCapture capture)
+    {
+        ImGui.Separator();
+        if (retainerSweepActive)
+        {
+            ImGui.TextWrapped(retainerSweepStatus);
+            ImGui.ProgressBar(retainerSweepPlans.Count == 0 ? 0 : retainerSweepIndex / (float)retainerSweepPlans.Count,
+                new Vector2(-1, 0), $"{retainerSweepChanged} changed · {retainerSweepSkipped} skipped · {retainerSweepIndex}/{retainerSweepPlans.Count} checked");
+            if (ImGui.Button("Stop retainer sweep"))
+            {
+                retainerSweepActive = false;
+                retainerSweepStatus = "Sweep stopped by user; no further prices will be submitted.";
+            }
+            ImGui.TextDisabled("Keep the Items for Sale window open and do not interact with it during the sweep.");
+            return;
+        }
+
+        ImGui.Checkbox("Arm one retainer sweep", ref armRetainerSweep);
+        ImGui.SameLine();
+        var canStartSweep = armRetainerSweep && pendingPriceVerification is null;
+        if (!canStartSweep) ImGui.BeginDisabled();
+        if (ImGui.Button("Start captured sweep"))
+        {
+            StartRetainerSweep(capture);
+            armRetainerSweep = false;
+        }
+        if (!canStartSweep) ImGui.EndDisabled();
+        ImGui.TextDisabled("Changes only captured 5/5 watched listings with a valid different proposal; stops on first failure.");
+        if (retainerSweepStatus.Length > 0) ImGui.TextWrapped(retainerSweepStatus);
+    }
+
+    private void StartRetainerSweep(RetainerListingCapture capture)
+    {
+        retainerSweepPlans = [];
+        retainerSweepSkipped = 0;
+        foreach (var listing in capture.Listings)
+        {
+            var proposed = FindProposal(listing);
+            if (proposed is not > 0 || (ulong)proposed.Value == listing.CurrentPrice)
+            {
+                retainerSweepSkipped++;
+                continue;
+            }
+            retainerSweepPlans.Add(new RetainerRepricePlan(listing, (uint)proposed.Value));
+        }
+        retainerSweepIndex = 0;
+        retainerSweepChanged = 0;
+        retainerSweepNextAt = DateTime.UtcNow;
+        if (retainerSweepPlans.Count == 0)
+        {
+            retainerSweepStatus = $"Nothing to change; {retainerSweepSkipped} listing(s) were unchanged or had no proposal.";
+            return;
+        }
+        retainerSweepActive = true;
+        retainerSweepStatus = $"Starting one-retainer sweep: {retainerSweepPlans.Count} change(s), {retainerSweepSkipped} initial skip(s).";
+    }
+
+    private void AdvanceRetainerSweep()
+    {
+        if (!retainerSweepActive || pendingPriceVerification is not null || DateTime.UtcNow < retainerSweepNextAt) return;
+        if (retainerSweepIndex >= retainerSweepPlans.Count)
+        {
+            retainerSweepActive = false;
+            retainerSweepStatus = $"SWEEP COMPLETE: {retainerSweepChanged} changed, {retainerSweepSkipped} skipped. Reopen Items for Sale to refresh its visible prices.";
+            retainerCapture = retainerListings.Capture(config.PentameldPricingWatchList);
+            return;
+        }
+
+        var plan = retainerSweepPlans[retainerSweepIndex++];
+        var liveCapture = retainerListings.Capture(config.PentameldPricingWatchList);
+        var liveListing = liveCapture.Listings.FirstOrDefault(x => x.MarketSlot == plan.Listing.MarketSlot);
+        if (liveListing is null || liveListing.ItemId != plan.Listing.ItemId || liveListing.Hq != plan.Listing.Hq)
+        {
+            StopRetainerSweep($"Stopped before slot {plan.Listing.MarketSlot + 1}: listing identity changed.");
+            return;
+        }
+        var submission = retainerListings.SubmitOne(liveListing, plan.ProposedPrice, config.MaxSingleRepriceDecreasePercent);
+        if (!submission.Submitted)
+        {
+            StopRetainerSweep($"Stopped on {plan.Listing.Name}: {submission.Status}");
+            return;
+        }
+        retainerSweepStatus = $"Verifying {plan.Listing.Name}: {liveListing.CurrentPrice:N0} → {plan.ProposedPrice:N0} gil...";
+        pendingPriceVerification = new PendingPriceVerification(liveListing, plan.ProposedPrice, DateTime.UtcNow.AddSeconds(10), true);
+    }
+
+    private void StopRetainerSweep(string reason)
+    {
+        retainerSweepActive = false;
+        retainerSweepStatus = $"SWEEP STOPPED after {retainerSweepChanged} change(s): {reason}";
     }
 
     private int? FindProposal(CapturedRetainerListing listing) => autoRetainerPricing.LastResults
@@ -463,16 +565,30 @@ internal sealed class MainWindow : Window
         var livePrice = retainerListings.ReadPrice(pending.Listing);
         if (livePrice == pending.ExpectedPrice)
         {
-            singleRepriceStatus = $"Verified: {pending.Listing.Name} is now {livePrice:N0} gil.";
+            var verified = $"Verified: {pending.Listing.Name} is now {livePrice:N0} gil.";
             pendingPriceVerification = null;
             retainerCapture = retainerListings.Capture(config.PentameldPricingWatchList);
+            if (pending.IsSweep)
+            {
+                retainerSweepChanged++;
+                retainerSweepStatus = retainerSweepActive
+                    ? verified
+                    : $"Sweep stopped; the already-submitted final change was verified. {verified}";
+                retainerSweepNextAt = DateTime.UtcNow.AddSeconds(1);
+            }
+            else
+            {
+                singleRepriceStatus = verified;
+            }
             return;
         }
         if (DateTime.UtcNow <= pending.Deadline) return;
-        singleRepriceStatus = livePrice is null
+        var timeout = livePrice is null
             ? "Price verification timed out because the sale window or item identity changed. Inspect the listing manually."
             : $"Price verification timed out; the live price is {livePrice:N0} gil instead of {pending.ExpectedPrice:N0}. Inspect it manually.";
         pendingPriceVerification = null;
+        if (pending.IsSweep) StopRetainerSweep(timeout);
+        else singleRepriceStatus = timeout;
     }
 
     private void StartPricingScan()
@@ -668,5 +784,6 @@ internal sealed class MainWindow : Window
     };
 
     private sealed record PricingCatalogItem(uint ItemId, string Name);
-    private sealed record PendingPriceVerification(CapturedRetainerListing Listing, uint ExpectedPrice, DateTime Deadline);
+    private sealed record PendingPriceVerification(CapturedRetainerListing Listing, uint ExpectedPrice, DateTime Deadline, bool IsSweep);
+    private sealed record RetainerRepricePlan(CapturedRetainerListing Listing, uint ProposedPrice);
 }
