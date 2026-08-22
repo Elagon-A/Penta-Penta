@@ -20,6 +20,7 @@ internal sealed class MainWindow : Window
     private readonly MeldController controller;
     private readonly PentameldPricingService pricing;
     private readonly AutoRetainerPricingBridge autoRetainerPricing;
+    private readonly RetainerListingScanner retainerListings;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private List<MateriaStock> materiaStock = [];
@@ -36,11 +37,12 @@ internal sealed class MainWindow : Window
     private string pricingItemSearch = "";
     private bool pricingPickerHq = true;
     private string pricingPickerStatus = "";
+    private RetainerListingCapture? retainerCapture;
 
-    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing)
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings)
         : base("PentaPenta###PentaPentaMain")
     {
-        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing;
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings;
         pricingCatalog = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
             .Where(x => x.EquipSlotCategory.RowId != 0 && x.MateriaSlotCount > 0 && x.IsAdvancedMeldingPermitted)
             .Select(x => new PricingCatalogItem(x.RowId, x.Name.ExtractText()))
@@ -298,6 +300,40 @@ internal sealed class MainWindow : Window
             SaveConfig();
         }
         ImGui.TextDisabled(pricingStatus);
+
+        ImGui.Separator();
+        if (ImGui.Button("Capture open retainer listings"))
+            retainerCapture = retainerListings.Capture(config.PentameldPricingWatchList);
+        ImGui.SameLine();
+        ImGui.TextDisabled("Read only; requires the retainer Items for Sale window.");
+        if (retainerCapture is { } capture)
+        {
+            ImGui.TextWrapped(capture.Status);
+            if (capture.Listings.Count > 0 && ImGui.BeginTable("retainer-listing-capture", 5,
+                    ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY,
+                    new Vector2(0, Math.Min(180, 28 + capture.Listings.Count * 24))))
+            {
+                ImGui.TableSetupColumn("Active retainer listing");
+                ImGui.TableSetupColumn("Slot", ImGuiTableColumnFlags.WidthFixed, 50);
+                ImGui.TableSetupColumn("Melds", ImGuiTableColumnFlags.WidthFixed, 55);
+                ImGui.TableSetupColumn("Current", ImGuiTableColumnFlags.WidthFixed, 110);
+                ImGui.TableSetupColumn("Proposed", ImGuiTableColumnFlags.WidthFixed, 110);
+                ImGui.TableHeadersRow();
+                foreach (var listing in capture.Listings)
+                {
+                    var proposal = autoRetainerPricing.LastResults
+                        .Concat(pricingResults)
+                        .FirstOrDefault(x => x.ItemId == listing.ItemId && x.Hq == listing.Hq)?.ProposedPrice;
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted(listing.Name + (listing.Hq ? " ★" : ""));
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted((listing.MarketSlot + 1).ToString());
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted($"{listing.MateriaCount}/5");
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted($"{listing.CurrentPrice:N0} gil");
+                    ImGui.TableNextColumn(); ImGui.TextUnformatted(FormatGil(proposal));
+                }
+                ImGui.EndTable();
+            }
+        }
 
         ImGui.Separator();
         var dryRun = config.EnableAutoRetainerPricingDryRun;
