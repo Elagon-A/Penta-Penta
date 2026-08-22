@@ -40,6 +40,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - A searchable equipment picker can add HQ or NQ pentameldable items directly to the pricing watchlist even when they are not in the player's inventory.
 - The pricing picker can add every item matching its active text filter at once, applying the selected HQ/NQ quality and skipping existing watch entries.
 - A read-only active-retainer capture reads the loaded Items for Sale inventory, verifies watched item identity, quality, and 5/5 materia, and displays current versus proposed prices without clicking the retainer UI.
+- A manually armed single-listing repricing test revalidates the open sale window, market slot, item identity, quality, 5/5 materia, unchanged current price, valid proposal, and maximum decrease before submitting one price and reading it back for confirmation.
 - Eligible inventory gear has a **Pentameld** context-menu action that opens PentaPenta with the exact bag/slot selected.
 - Preparing a queue opens the Materia Melding window automatically when it is available.
 - Overcap rejections are cached per item and grade during a queue so later slots skip choices already proven not to fit.

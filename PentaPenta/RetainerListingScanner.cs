@@ -34,6 +34,49 @@ internal sealed class RetainerListingScanner(Services services)
         var status = $"Captured {listings.Count} watched pentamelded listing(s) from {loadedCount} loaded sale slot(s).";
         return new RetainerListingCapture(listings, loadedCount, status);
     }
+
+    internal unsafe PriceChangeSubmission SubmitOne(CapturedRetainerListing captured, uint proposedPrice, int maxDecreasePercent)
+    {
+        if (services.GameGui.GetAddonByName("RetainerSellList").IsNull)
+            return new(false, "The retainer Items for Sale window is no longer open.");
+        if (proposedPrice == 0 || proposedPrice > 999_999_999)
+            return new(false, "The proposed price is outside the game's valid range.");
+
+        GameInventoryItem live = default;
+        foreach (ref readonly var candidate in services.Inventory.GetInventoryItems(GameInventoryType.RetainerMarket))
+            if (!candidate.IsEmpty && candidate.InventorySlot == captured.MarketSlot) { live = candidate; break; }
+        if (live.IsEmpty || live.BaseItemId != captured.ItemId || live.IsHq != captured.Hq)
+            return new(false, "The item identity or quality in that market slot changed after capture.");
+        if (live.MateriaEntries.Count(x => x.Type.RowId != 0) != 5)
+            return new(false, "The selected listing is no longer verified as 5/5 melded.");
+
+        var manager = InventoryManager.Instance();
+        if (manager == null) return new(false, "The inventory manager was not available.");
+        var currentPrice = manager->GetRetainerMarketPrice((short)captured.MarketSlot);
+        if (currentPrice != captured.CurrentPrice)
+            return new(false, $"The live price changed from {captured.CurrentPrice:N0} to {currentPrice:N0} gil; capture again.");
+        if (currentPrice == proposedPrice)
+            return new(false, "The listing is already at the proposed price.");
+
+        maxDecreasePercent = Math.Clamp(maxDecreasePercent, 0, 100);
+        var minimumAllowed = currentPrice * (ulong)(100 - maxDecreasePercent) / 100;
+        if (proposedPrice < minimumAllowed)
+            return new(false, $"Rejected: {proposedPrice:N0} gil exceeds the {maxDecreasePercent}% maximum decrease.");
+
+        manager->SetRetainerMarketPrice((short)captured.MarketSlot, proposedPrice);
+        return new(true, $"Submitted {captured.Name}: {currentPrice:N0} → {proposedPrice:N0} gil.");
+    }
+
+    internal unsafe ulong? ReadPrice(CapturedRetainerListing captured)
+    {
+        if (services.GameGui.GetAddonByName("RetainerSellList").IsNull) return null;
+        GameInventoryItem live = default;
+        foreach (ref readonly var candidate in services.Inventory.GetInventoryItems(GameInventoryType.RetainerMarket))
+            if (!candidate.IsEmpty && candidate.InventorySlot == captured.MarketSlot) { live = candidate; break; }
+        if (live.IsEmpty || live.BaseItemId != captured.ItemId || live.IsHq != captured.Hq) return null;
+        var manager = InventoryManager.Instance();
+        return manager == null ? null : manager->GetRetainerMarketPrice((short)captured.MarketSlot);
+    }
 }
 
 internal sealed record CapturedRetainerListing(
@@ -48,3 +91,5 @@ internal sealed record RetainerListingCapture(
     IReadOnlyList<CapturedRetainerListing> Listings,
     int LoadedListings,
     string Status);
+
+internal sealed record PriceChangeSubmission(bool Submitted, string Status);

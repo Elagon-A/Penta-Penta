@@ -16,6 +16,7 @@ public sealed class Configuration : IPluginConfiguration
     public int PentameldPricingUndercutGil { get; set; } = 1;
     public string PentameldPricingOwnRetainers { get; set; } = "";
     public bool EnableAutoRetainerPricingDryRun { get; set; }
+    public int MaxSingleRepriceDecreasePercent { get; set; } = 10;
 }
 
 public sealed record QueuedItem(uint ItemId, string Name, int Container, uint Slot, bool Hq);

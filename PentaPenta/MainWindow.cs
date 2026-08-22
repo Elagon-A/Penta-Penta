@@ -38,6 +38,10 @@ internal sealed class MainWindow : Window
     private bool pricingPickerHq = true;
     private string pricingPickerStatus = "";
     private RetainerListingCapture? retainerCapture;
+    private uint? selectedRepriceSlot;
+    private bool armSingleReprice;
+    private string singleRepriceStatus = "";
+    private PendingPriceVerification? pendingPriceVerification;
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings)
         : base("PentaPenta###PentaPentaMain")
@@ -210,6 +214,7 @@ internal sealed class MainWindow : Window
     private void DrawPentameldPricing()
     {
         PollPricingScan();
+        PollPendingPriceVerification();
         ImGui.TextWrapped("Read-only market comparison. A qualifying competitor is the same item and quality with exactly five materia; materia types and grades may differ.");
         ImGui.TextDisabled("This tab does not invoke AutoRetainer or change any sale price. Universalis data may be several minutes old.");
         ImGui.Separator();
@@ -309,10 +314,11 @@ internal sealed class MainWindow : Window
         if (retainerCapture is { } capture)
         {
             ImGui.TextWrapped(capture.Status);
-            if (capture.Listings.Count > 0 && ImGui.BeginTable("retainer-listing-capture", 5,
+            if (capture.Listings.Count > 0 && ImGui.BeginTable("retainer-listing-capture", 6,
                     ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY,
                     new Vector2(0, Math.Min(180, 28 + capture.Listings.Count * 24))))
             {
+                ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 28);
                 ImGui.TableSetupColumn("Active retainer listing");
                 ImGui.TableSetupColumn("Slot", ImGuiTableColumnFlags.WidthFixed, 50);
                 ImGui.TableSetupColumn("Melds", ImGuiTableColumnFlags.WidthFixed, 55);
@@ -321,10 +327,14 @@ internal sealed class MainWindow : Window
                 ImGui.TableHeadersRow();
                 foreach (var listing in capture.Listings)
                 {
-                    var proposal = autoRetainerPricing.LastResults
-                        .Concat(pricingResults)
-                        .FirstOrDefault(x => x.ItemId == listing.ItemId && x.Hq == listing.Hq)?.ProposedPrice;
+                    var proposal = FindProposal(listing);
                     ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    var canSelect = proposal is > 0 && (ulong)proposal.Value != listing.CurrentPrice;
+                    if (!canSelect) ImGui.BeginDisabled();
+                    var selected = selectedRepriceSlot == listing.MarketSlot;
+                    if (ImGui.RadioButton($"##reprice-{listing.MarketSlot}", selected)) selectedRepriceSlot = listing.MarketSlot;
+                    if (!canSelect) ImGui.EndDisabled();
                     ImGui.TableNextColumn(); ImGui.TextUnformatted(listing.Name + (listing.Hq ? " ★" : ""));
                     ImGui.TableNextColumn(); ImGui.TextUnformatted((listing.MarketSlot + 1).ToString());
                     ImGui.TableNextColumn(); ImGui.TextUnformatted($"{listing.MateriaCount}/5");
@@ -333,6 +343,7 @@ internal sealed class MainWindow : Window
                 }
                 ImGui.EndTable();
             }
+            DrawSingleRepriceControls(capture);
         }
 
         ImGui.Separator();
@@ -405,6 +416,63 @@ internal sealed class MainWindow : Window
             pricingResults = pricingResults.Where(x => x.ItemId != id || x.Hq != removeHq).ToList();
             SaveConfig();
         }
+    }
+
+    private void DrawSingleRepriceControls(RetainerListingCapture capture)
+    {
+        var maxDecrease = config.MaxSingleRepriceDecreasePercent;
+        ImGui.SetNextItemWidth(90);
+        if (ImGui.InputInt("Maximum decrease (%)", ref maxDecrease))
+        {
+            config.MaxSingleRepriceDecreasePercent = Math.Clamp(maxDecrease, 0, 100);
+            SaveConfig();
+        }
+        var selectedListing = selectedRepriceSlot is { } slot
+            ? capture.Listings.FirstOrDefault(x => x.MarketSlot == slot)
+            : null;
+        var proposed = selectedListing is null ? null : FindProposal(selectedListing);
+        if (selectedListing is not null)
+            ImGui.TextWrapped($"Selected: {selectedListing.Name} — {selectedListing.CurrentPrice:N0} → {FormatGil(proposed)}");
+
+        var busy = pendingPriceVerification is not null;
+        if (busy) ImGui.BeginDisabled();
+        ImGui.Checkbox("Arm one price change", ref armSingleReprice);
+        ImGui.SameLine();
+        var canSubmit = armSingleReprice && selectedListing is not null && proposed is > 0;
+        if (!canSubmit) ImGui.BeginDisabled();
+        if (ImGui.Button("Apply selected price once") && selectedListing is not null && proposed is > 0)
+        {
+            var submission = retainerListings.SubmitOne(selectedListing, (uint)proposed.Value, config.MaxSingleRepriceDecreasePercent);
+            singleRepriceStatus = submission.Status;
+            armSingleReprice = false;
+            if (submission.Submitted)
+                pendingPriceVerification = new PendingPriceVerification(selectedListing, (uint)proposed.Value, DateTime.UtcNow.AddSeconds(10));
+        }
+        if (!canSubmit) ImGui.EndDisabled();
+        if (busy) ImGui.EndDisabled();
+        if (singleRepriceStatus.Length > 0) ImGui.TextWrapped(singleRepriceStatus);
+    }
+
+    private int? FindProposal(CapturedRetainerListing listing) => autoRetainerPricing.LastResults
+        .Concat(pricingResults)
+        .FirstOrDefault(x => x.ItemId == listing.ItemId && x.Hq == listing.Hq)?.ProposedPrice;
+
+    private void PollPendingPriceVerification()
+    {
+        if (pendingPriceVerification is not { } pending) return;
+        var livePrice = retainerListings.ReadPrice(pending.Listing);
+        if (livePrice == pending.ExpectedPrice)
+        {
+            singleRepriceStatus = $"Verified: {pending.Listing.Name} is now {livePrice:N0} gil.";
+            pendingPriceVerification = null;
+            retainerCapture = retainerListings.Capture(config.PentameldPricingWatchList);
+            return;
+        }
+        if (DateTime.UtcNow <= pending.Deadline) return;
+        singleRepriceStatus = livePrice is null
+            ? "Price verification timed out because the sale window or item identity changed. Inspect the listing manually."
+            : $"Price verification timed out; the live price is {livePrice:N0} gil instead of {pending.ExpectedPrice:N0}. Inspect it manually.";
+        pendingPriceVerification = null;
     }
 
     private void StartPricingScan()
@@ -600,4 +668,5 @@ internal sealed class MainWindow : Window
     };
 
     private sealed record PricingCatalogItem(uint ItemId, string Name);
+    private sealed record PendingPriceVerification(CapturedRetainerListing Listing, uint ExpectedPrice, DateTime Deadline);
 }
