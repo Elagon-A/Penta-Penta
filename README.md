@@ -36,6 +36,7 @@ A Dalamud plugin for selecting pentameldable gear directly from the four player 
 - A persistent Materia History tab totals consumption by materia type and preserves the statistics across updates and restarts.
 - A read-only Pentameld Pricing tab scans watched items against same-world Universalis listings, filters to matching HQ/NQ listings with exactly five materia, excludes configured own-retainer names, and proposes a configurable gil undercut.
 - An opt-in AutoRetainer dry-run hook uses AutoRetainer's supported retainer post-process handshake, calculates watched-item proposals for each processed retainer, and releases the post-process slot without changing sale prices.
+- The same AutoRetainer pricing dry run can be started manually at any time without invoking AutoRetainer or waiting for a completed venture.
 - Eligible inventory gear has a **Pentameld** context-menu action that opens PentaPenta with the exact bag/slot selected.
 - Preparing a queue opens the Materia Melding window automatically when it is available.
 - Overcap rejections are cached per item and grade during a queue so later slots skip choices already proven not to fit.

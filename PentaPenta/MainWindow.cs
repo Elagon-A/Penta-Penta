@@ -242,6 +242,11 @@ internal sealed class MainWindow : Window
             autoRetainerPricing.ConfigurationChanged();
         }
         ImGui.TextDisabled("During AutoRetainer post-processing, calculate proposals for watched items without changing prices.");
+        if (autoRetainerPricing.IsBusy) ImGui.BeginDisabled();
+        if (ImGui.Button("Run dry test now")) autoRetainerPricing.RunManualDryTest();
+        if (autoRetainerPricing.IsBusy) ImGui.EndDisabled();
+        ImGui.SameLine();
+        ImGui.TextDisabled("Does not require or invoke AutoRetainer.");
         ImGui.TextWrapped($"AutoRetainer: {autoRetainerPricing.Status}");
         if (autoRetainerPricing.LastResults.Count > 0)
         {

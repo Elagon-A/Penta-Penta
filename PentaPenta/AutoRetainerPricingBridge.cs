@@ -22,6 +22,7 @@ internal sealed class AutoRetainerPricingBridge : IDisposable
     internal string Status { get; private set; } = "Dry run disabled.";
     internal string LastRetainer { get; private set; } = "";
     internal IReadOnlyList<PentameldPriceResult> LastResults { get; private set; } = [];
+    internal bool IsBusy => requestPending || ownsPostprocessSlot || scanTask is not null;
 
     internal AutoRetainerPricingBridge(Services services, Configuration config, PentameldPricingService pricing)
     {
@@ -43,6 +44,21 @@ internal sealed class AutoRetainerPricingBridge : IDisposable
             Status = "Dry run disabled.";
         else if (!ownsPostprocessSlot && scanTask is null)
             Status = "Waiting for AutoRetainer to process a retainer.";
+    }
+
+    internal void RunManualDryTest()
+    {
+        if (IsBusy)
+        {
+            Status = "A pricing dry run is already active.";
+            return;
+        }
+        if (config.PentameldPricingWatchList.Count == 0)
+        {
+            Status = "Add at least one item to the pricing watchlist first.";
+            return;
+        }
+        StartScan("Manual test", null);
     }
 
     private void OnAdditionalTask(string retainerName)
@@ -68,7 +84,12 @@ internal sealed class AutoRetainerPricingBridge : IDisposable
         if (!string.Equals(pluginName, PluginName, StringComparison.Ordinal)) return;
         requestPending = false;
         ownsPostprocessSlot = true;
-        LastRetainer = retainerName;
+        StartScan(retainerName, retainerName);
+    }
+
+    private void StartScan(string displayName, string? activeRetainer)
+    {
+        LastRetainer = displayName;
         var worldId = services.Objects.LocalPlayer?.HomeWorld.RowId ?? 0;
         if (worldId == 0)
         {
@@ -79,12 +100,12 @@ internal sealed class AutoRetainerPricingBridge : IDisposable
 
         var exclusions = config.PentameldPricingOwnRetainers
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Append(retainerName)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(activeRetainer)) exclusions.Add(activeRetainer);
         var watch = config.PentameldPricingWatchList
             .Select(x => new PentameldPricingWatchItem { ItemId = x.ItemId, Name = x.Name, Hq = x.Hq })
             .ToList();
-        Status = $"Dry-running {watch.Count} watched item(s) for {retainerName}...";
+        Status = $"Dry-running {watch.Count} watched item(s) for {displayName}...";
         scanTask = pricing.ScanAsync(worldId, watch, exclusions, config.PentameldPricingUndercutGil);
     }
 
