@@ -12,9 +12,19 @@ public sealed class Configuration : IPluginConfiguration
     public List<QueuedItem> Queue { get; set; } = [];
     public Dictionary<uint, CraftingMeldPreset> CraftingPresets { get; set; } = [];
     public Dictionary<uint, long> MateriaConsumedHistory { get; set; } = [];
+    public List<PentameldPricingWatchItem> PentameldPricingWatchList { get; set; } = [];
+    public int PentameldPricingUndercutGil { get; set; } = 1;
+    public string PentameldPricingOwnRetainers { get; set; } = "";
 }
 
 public sealed record QueuedItem(uint ItemId, string Name, int Container, uint Slot, bool Hq);
+
+public sealed class PentameldPricingWatchItem
+{
+    public uint ItemId { get; set; }
+    public string Name { get; set; } = "";
+    public bool Hq { get; set; }
+}
 
 public enum CraftingMateria
 {

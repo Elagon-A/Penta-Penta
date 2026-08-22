@@ -18,6 +18,7 @@ internal sealed class MainWindow : Window
     private readonly Configuration config;
     private readonly InventoryScanner scanner;
     private readonly MeldController controller;
+    private readonly PentameldPricingService pricing;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private List<MateriaStock> materiaStock = [];
@@ -27,11 +28,14 @@ internal sealed class MainWindow : Window
     private CraftingMeldPreset? copiedCraftingPreset;
     private string copiedCraftingPresetSource = "";
     private string presetCopyStatus = "";
+    private Task<IReadOnlyList<PentameldPriceResult>>? pricingScanTask;
+    private IReadOnlyList<PentameldPriceResult> pricingResults = [];
+    private string pricingStatus = "Add checked queue items, then refresh prices.";
 
-    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller)
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing)
         : base("PentaPenta###PentaPentaMain")
     {
-        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller;
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 500), MaximumSize = new Vector2(float.MaxValue) };
         Refresh();
     }
@@ -48,6 +52,11 @@ internal sealed class MainWindow : Window
         if (ImGui.BeginTabItem("Materia History"))
         {
             DrawMateriaHistory();
+            ImGui.EndTabItem();
+        }
+        if (ImGui.BeginTabItem("Pentameld Pricing"))
+        {
+            DrawPentameldPricing();
             ImGui.EndTabItem();
         }
         ImGui.EndTabBar();
@@ -184,6 +193,121 @@ internal sealed class MainWindow : Window
         }
         ImGui.EndTable();
     }
+
+    private void DrawPentameldPricing()
+    {
+        PollPricingScan();
+        ImGui.TextWrapped("Read-only market comparison. A qualifying competitor is the same item and quality with exactly five materia; materia types and grades may differ.");
+        ImGui.TextDisabled("This tab does not invoke AutoRetainer or change any sale price. Universalis data may be several minutes old.");
+        ImGui.Separator();
+
+        if (ImGui.Button("Add checked queue items"))
+        {
+            foreach (var item in gear.Where(x => selected.Contains(Key(x))))
+            {
+                if (config.PentameldPricingWatchList.Any(x => x.ItemId == item.ItemId && x.Hq == item.Hq)) continue;
+                config.PentameldPricingWatchList.Add(new PentameldPricingWatchItem { ItemId = item.ItemId, Name = item.Name, Hq = item.Hq });
+            }
+            SaveConfig();
+        }
+        ImGui.SameLine();
+        var scanRunning = pricingScanTask is { IsCompleted: false };
+        if (scanRunning || config.PentameldPricingWatchList.Count == 0) ImGui.BeginDisabled();
+        if (ImGui.Button(scanRunning ? "Refreshing..." : "Refresh prices")) StartPricingScan();
+        if (scanRunning || config.PentameldPricingWatchList.Count == 0) ImGui.EndDisabled();
+
+        var undercut = config.PentameldPricingUndercutGil;
+        ImGui.SetNextItemWidth(100);
+        if (ImGui.InputInt("Undercut (gil)", ref undercut))
+        {
+            config.PentameldPricingUndercutGil = Math.Clamp(undercut, 0, 1_000_000);
+            SaveConfig();
+        }
+        var ownRetainers = config.PentameldPricingOwnRetainers;
+        ImGui.SetNextItemWidth(400);
+        if (ImGui.InputTextWithHint("Own retainers", "Comma-separated names to exclude", ref ownRetainers, 500))
+        {
+            config.PentameldPricingOwnRetainers = ownRetainers;
+            SaveConfig();
+        }
+        ImGui.TextDisabled(pricingStatus);
+
+        uint? removeItemId = null;
+        bool removeHq = false;
+        if (ImGui.BeginTable("pentameld-pricing", 6,
+                ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY,
+                new Vector2(0, -1)))
+        {
+            ImGui.TableSetupColumn("Item");
+            ImGui.TableSetupColumn("Quality", ImGuiTableColumnFlags.WidthFixed, 65);
+            ImGui.TableSetupColumn("Matches", ImGuiTableColumnFlags.WidthFixed, 70);
+            ImGui.TableSetupColumn("Cheapest", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Proposed", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 70);
+            ImGui.TableHeadersRow();
+            foreach (var watch in config.PentameldPricingWatchList)
+            {
+                var result = pricingResults.FirstOrDefault(x => x.ItemId == watch.ItemId && x.Hq == watch.Hq);
+                ImGui.PushID($"pricing-{watch.ItemId}-{watch.Hq}");
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(watch.Name);
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(watch.Hq ? "HQ" : "NQ");
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(result is null ? "—" : result.Error is null ? result.QualifyingListings.ToString("N0") : "Error");
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(FormatGil(result?.CheapestPrice));
+                ImGui.TableNextColumn(); ImGui.TextUnformatted(FormatGil(result?.ProposedPrice));
+                ImGui.TableNextColumn();
+                if (ImGui.SmallButton("Remove")) { removeItemId = watch.ItemId; removeHq = watch.Hq; }
+                if (result?.Error is { Length: > 0 } error && ImGui.IsItemHovered()) ImGui.SetTooltip(error);
+                ImGui.PopID();
+            }
+            ImGui.EndTable();
+        }
+        if (removeItemId is { } id)
+        {
+            config.PentameldPricingWatchList.RemoveAll(x => x.ItemId == id && x.Hq == removeHq);
+            pricingResults = pricingResults.Where(x => x.ItemId != id || x.Hq != removeHq).ToList();
+            SaveConfig();
+        }
+    }
+
+    private void StartPricingScan()
+    {
+        var worldId = services.Objects.LocalPlayer?.HomeWorld.RowId ?? 0;
+        if (worldId == 0)
+        {
+            pricingStatus = "Log in to a character before refreshing prices.";
+            return;
+        }
+        var exclusions = config.PentameldPricingOwnRetainers
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var snapshot = config.PentameldPricingWatchList
+            .Select(x => new PentameldPricingWatchItem { ItemId = x.ItemId, Name = x.Name, Hq = x.Hq })
+            .ToList();
+        pricingStatus = $"Refreshing {snapshot.Count} item(s)...";
+        pricingScanTask = pricing.ScanAsync(worldId, snapshot, exclusions, config.PentameldPricingUndercutGil);
+    }
+
+    private void PollPricingScan()
+    {
+        if (pricingScanTask is not { IsCompleted: true } task) return;
+        pricingScanTask = null;
+        try
+        {
+            pricingResults = task.GetAwaiter().GetResult();
+            var errors = pricingResults.Count(x => x.Error is not null);
+            pricingStatus = errors == 0
+                ? $"Updated {pricingResults.Count} item(s)."
+                : $"Updated with {errors} error(s); hover Error for details.";
+        }
+        catch (Exception ex)
+        {
+            pricingStatus = $"Pricing refresh failed: {ex.Message}";
+        }
+    }
+
+    private void SaveConfig() => services.PluginInterface.SavePluginConfig(config);
+    private static string FormatGil(int? value) => value is null ? "—" : $"{value.Value:N0} gil";
 
     private void Refresh()
     {
