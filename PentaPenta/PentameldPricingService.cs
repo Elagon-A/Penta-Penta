@@ -66,7 +66,7 @@ internal sealed class PentameldPricingService : IDisposable
 
     private sealed class UniversalisListing
     {
-        [JsonPropertyName("unitPrice")]
+        [JsonPropertyName("pricePerUnit")]
         public int UnitPrice { get; set; }
 
         [JsonPropertyName("hq")]
