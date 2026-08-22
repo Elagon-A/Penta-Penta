@@ -50,6 +50,9 @@ internal sealed class MainWindow : Window
     private int retainerSweepSkipped;
     private DateTime retainerSweepNextAt;
     private string retainerSweepStatus = "";
+    private bool listingAuditActive;
+    private readonly Dictionary<string, IReadOnlyList<CapturedRetainerListing>> listingAuditSnapshots = new(StringComparer.OrdinalIgnoreCase);
+    private string listingAuditStatus = "Start a fresh audit, then capture each retainer's Items for Sale window.";
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings)
         : base("PentaPenta###PentaPentaMain")
@@ -317,7 +320,10 @@ internal sealed class MainWindow : Window
 
         ImGui.Separator();
         if (ImGui.Button("Capture open retainer listings"))
+        {
             retainerCapture = retainerListings.Capture(config.PentameldPricingWatchList);
+            RecordListingAuditCapture(retainerCapture);
+        }
         ImGui.SameLine();
         ImGui.TextDisabled("Read only; requires the retainer Items for Sale window.");
         if (retainerCapture is { } capture)
@@ -361,6 +367,8 @@ internal sealed class MainWindow : Window
             DrawSingleRepriceControls(capture);
             DrawRetainerSweepControls(capture);
         }
+
+        DrawListingCoverageAudit();
 
         ImGui.Separator();
         var dryRun = config.EnableAutoRetainerPricingDryRun;
@@ -432,6 +440,73 @@ internal sealed class MainWindow : Window
             pricingResults = pricingResults.Where(x => x.ItemId != id || x.Hq != removeHq).ToList();
             SaveConfig();
         }
+    }
+
+    private void DrawListingCoverageAudit()
+    {
+        if (!ImGui.CollapsingHeader("Missing / recraft audit")) return;
+        if (ImGui.Button(listingAuditActive ? "Restart audit" : "Start fresh audit"))
+        {
+            listingAuditSnapshots.Clear();
+            listingAuditActive = true;
+            listingAuditStatus = "Audit started. Open each retainer's Items for Sale window and click Capture open retainer listings.";
+        }
+        ImGui.SameLine();
+        if (!listingAuditActive) ImGui.BeginDisabled();
+        if (ImGui.Button("Finish audit"))
+        {
+            listingAuditActive = false;
+            listingAuditStatus = "Audit finished. The missing table reflects the captured retainers below.";
+        }
+        if (!listingAuditActive) ImGui.EndDisabled();
+
+        var expectedNames = config.PentameldPricingOwnRetainers
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var expectedCaptured = expectedNames.Count(x => listingAuditSnapshots.ContainsKey(x));
+        ImGui.TextWrapped(listingAuditStatus);
+        ImGui.TextUnformatted(expectedNames.Count > 0
+            ? $"Retainers captured: {expectedCaptured}/{expectedNames.Count} configured ({listingAuditSnapshots.Count} total snapshots)"
+            : $"Retainers captured: {listingAuditSnapshots.Count}. Add own-retainer names above to track audit completeness.");
+        if (listingAuditSnapshots.Count > 0)
+        {
+            ImGui.TextDisabled(string.Join(" · ", listingAuditSnapshots.OrderBy(x => x.Key).Select(x => $"{x.Key}: {x.Value.Count}")));
+        }
+
+        var present = listingAuditSnapshots.Values
+            .SelectMany(x => x)
+            .Select(x => (x.ItemId, x.Hq))
+            .ToHashSet();
+        var missing = config.PentameldPricingWatchList
+            .Where(x => !present.Contains((x.ItemId, x.Hq)))
+            .OrderBy(x => x.Name)
+            .ToList();
+        var complete = expectedNames.Count > 0 && expectedCaptured == expectedNames.Count;
+        if (!complete)
+            ImGui.TextColored(new Vector4(1f, 0.75f, 0.25f, 1f), "PRELIMINARY: uncaptured retainers can make items appear missing.");
+        ImGui.TextUnformatted($"Missing / recraft candidates: {missing.Count} of {config.PentameldPricingWatchList.Count} watched item(s)");
+        if (missing.Count == 0) return;
+        if (!ImGui.BeginTable("missing-recraft-items", 2,
+                ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY,
+                new Vector2(0, Math.Min(220, 28 + missing.Count * 24)))) return;
+        ImGui.TableSetupColumn("Missing watched item");
+        ImGui.TableSetupColumn("Quality", ImGuiTableColumnFlags.WidthFixed, 70);
+        ImGui.TableHeadersRow();
+        foreach (var item in missing)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn(); ImGui.TextUnformatted(item.Name);
+            ImGui.TableNextColumn(); ImGui.TextUnformatted(item.Hq ? "HQ" : "NQ");
+        }
+        ImGui.EndTable();
+    }
+
+    private void RecordListingAuditCapture(RetainerListingCapture capture)
+    {
+        if (!listingAuditActive || capture.RetainerName.Length == 0) return;
+        listingAuditSnapshots[capture.RetainerName] = capture.Listings.ToList();
+        listingAuditStatus = $"Recorded {capture.RetainerName}: {capture.Listings.Count} watched pentamelded listing(s).";
     }
 
     private void DrawSingleRepriceControls(RetainerListingCapture capture)
