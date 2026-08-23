@@ -286,22 +286,28 @@ internal sealed class MainWindow : Window
         ImGui.TextDisabled(pricingStatus);
         DrawMarketBoardReceiveDiagnostic();
 
-        if (retainerCapture is not { Listings.Count: > 0 } || retainerNativePriceSweep.IsRunning) ImGui.BeginDisabled();
+        var retainerWindowOpen = !services.GameGui.GetAddonByName("RetainerSellList").IsNull;
+        if (!retainerWindowOpen || retainerNativePriceSweep.IsRunning) ImGui.BeginDisabled();
         ImGui.Checkbox("Arm native retainer scan", ref armNativeRetainerScan);
         ImGui.SameLine();
         var nativeScanWasArmed = armNativeRetainerScan;
         if (!nativeScanWasArmed) ImGui.BeginDisabled();
-        if (ImGui.Button(retainerNativePriceSweep.IsRunning ? "Scanning retainer..." : "Start native retainer scan")
-            && retainerCapture is { Listings.Count: > 0 } nativeCapture)
+        if (ImGui.Button(retainerNativePriceSweep.IsRunning ? "Scanning retainer..." : "Sweep open retainer prices"))
         {
-            var exclusions = config.PentameldPricingOwnRetainers
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            retainerNativePriceSweep.Start(nativeCapture, config.PentameldPricingWatchList, exclusions, config.PentameldPricingUndercutGil);
+            var freshCapture = retainerListings.Capture(config.PentameldPricingWatchList);
+            retainerCapture = freshCapture;
+            RecordListingAuditCapture(freshCapture);
+            if (freshCapture.Listings.Count > 0)
+            {
+                var exclusions = config.PentameldPricingOwnRetainers
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                retainerNativePriceSweep.Start(freshCapture, config.PentameldPricingWatchList, exclusions, config.PentameldPricingUndercutGil);
+            }
             armNativeRetainerScan = false;
         }
         if (!nativeScanWasArmed) ImGui.EndDisabled();
-        if (retainerCapture is not { Listings.Count: > 0 } || retainerNativePriceSweep.IsRunning) ImGui.EndDisabled();
+        if (!retainerWindowOpen || retainerNativePriceSweep.IsRunning) ImGui.EndDisabled();
         if (retainerNativePriceSweep.IsRunning)
         {
             ImGui.SameLine();

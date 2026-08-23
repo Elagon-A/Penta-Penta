@@ -1,4 +1,5 @@
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace PentaPenta;
@@ -98,9 +99,18 @@ internal sealed class RetainerNativePriceSweep : IDisposable
             }
             case SweepPhase.OpenCompare:
             {
-                var addon = services.GameGui.GetAddonByName<AtkUnitBase>("RetainerSell");
+                var addon = services.GameGui.GetAddonByName<AddonRetainerSell>("RetainerSell");
                 if (addon == null || !addon->IsReady) { Stop($"Adjust Price did not open for {listing.Name}."); return; }
-                if (!InvokeButtonEvent(addon, 4)) { Stop("The calibrated Compare Prices button event was not found."); return; }
+                if (addon->ComparePrices == null || !addon->ComparePrices->IsEnabled)
+                {
+                    Stop($"Compare Prices was not available for {listing.Name}.");
+                    return;
+                }
+                if (!InvokeTypedButtonEvent((AtkUnitBase*)addon, addon->ComparePrices, 4))
+                {
+                    Stop("The typed Compare Prices button event was not found.");
+                    return;
+                }
                 phase = SweepPhase.WaitResults;
                 nextAction = DateTime.UtcNow.AddMilliseconds(750);
                 Status = $"Waiting for market results for {listing.Name} ({index + 1}/{listings.Count})...";
@@ -140,25 +150,57 @@ internal sealed class RetainerNativePriceSweep : IDisposable
         AtkComponentList* best = null;
         var bestCount = -1;
         detectedLists = 0;
-        for (var i = 0; i < addon->UldManager.NodeListCount; i++)
+        var visited = new HashSet<nint>();
+        FindListsRecursive(&addon->UldManager, 0, visited, ref best, ref bestCount, ref detectedLists);
+        largestCount = bestCount;
+        return best;
+    }
+
+    private static unsafe void FindListsRecursive(
+        AtkUldManager* manager,
+        int depth,
+        HashSet<nint> visited,
+        ref AtkComponentList* best,
+        ref int bestCount,
+        ref int detectedLists)
+    {
+        if (manager == null || manager->NodeList == null || depth > 8 || !visited.Add((nint)manager)) return;
+        for (var i = 0; i < manager->NodeListCount; i++)
         {
-            var node = addon->UldManager.NodeList[i];
+            var node = manager->NodeList[i];
             if (node == null || node->Type != NodeType.Component) continue;
             var component = node->GetAsAtkComponentNode()->Component;
             if (component == null) continue;
             var type = component->GetComponentType();
-            // This addon has used both variants across UI revisions. TreeList derives
-            // from AtkComponentList, so its list base can use the same selection API.
-            if (type != ComponentType.List && type != ComponentType.TreeList) continue;
-            detectedLists++;
-            var list = (AtkComponentList*)component;
-            var count = list->GetItemCount();
-            if (count <= bestCount) continue;
-            best = list;
-            bestCount = count;
+            if (type == ComponentType.List || type == ComponentType.TreeList)
+            {
+                detectedLists++;
+                var list = (AtkComponentList*)component;
+                var count = list->GetItemCount();
+                if (count > bestCount)
+                {
+                    best = list;
+                    bestCount = count;
+                }
+            }
+            FindListsRecursive(&component->UldManager, depth + 1, visited, ref best, ref bestCount, ref detectedLists);
         }
-        largestCount = bestCount;
-        return best;
+    }
+
+    private static unsafe bool InvokeTypedButtonEvent(AtkUnitBase* addon, AtkComponentButton* button, uint expectedParam)
+    {
+        var ownerNode = button->OwnerNode;
+        var evt = ownerNode == null ? null : ownerNode->AtkResNode.AtkEventManager.Event;
+        while (evt != null)
+        {
+            if (evt->State.EventType == AtkEventType.ButtonClick && evt->Param == expectedParam)
+            {
+                addon->ReceiveEvent(evt->State.EventType, (int)evt->Param, evt);
+                return true;
+            }
+            evt = evt->NextEvent;
+        }
+        return InvokeButtonEvent(addon, expectedParam);
     }
 
     private static unsafe bool InvokeButtonEvent(AtkUnitBase* addon, uint expectedParam)
