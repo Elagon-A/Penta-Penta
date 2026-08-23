@@ -8,13 +8,6 @@ namespace PentaPenta;
 internal sealed class RetainerPricingOverlay : Window
 {
     private readonly Services services;
-    private readonly Configuration config;
-    private readonly RetainerListingScanner listings;
-    private readonly RetainerNativePriceSweep sweep;
-    private bool armed;
-    private string status = "Arm once, then sweep this retainer's watched 5/5 listings.";
-
-    internal event Action<RetainerListingCapture>? Captured;
 
     internal RetainerPricingOverlay(
         Services services,
@@ -26,9 +19,6 @@ internal sealed class RetainerPricingOverlay : Window
             ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings)
     {
         this.services = services;
-        this.config = config;
-        this.listings = listings;
-        this.sweep = sweep;
         IsOpen = true;
         RespectCloseHotkey = false;
         DisableWindowSounds = true;
@@ -58,35 +48,6 @@ internal sealed class RetainerPricingOverlay : Window
     public override void Draw()
     {
         ImGui.TextUnformatted("PentaPenta pricing");
-        if (sweep.IsRunning)
-        {
-            if (ImGui.Button("Stop price scan")) sweep.Stop();
-        }
-        else
-        {
-            ImGui.Checkbox("Arm", ref armed);
-            ImGui.SameLine();
-            if (!armed) ImGui.BeginDisabled();
-            if (ImGui.Button("Sweep listings"))
-            {
-                var capture = listings.Capture(config.PentameldPricingWatchList);
-                Captured?.Invoke(capture);
-                if (capture.Listings.Count == 0)
-                {
-                    status = capture.Status;
-                }
-                else
-                {
-                    var exclusions = config.PentameldPricingOwnRetainers
-                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    sweep.Start(capture, config.PentameldPricingWatchList, exclusions, config.PentameldPricingUndercutGil);
-                    status = $"Started {capture.RetainerName}: {capture.Listings.Count} listing(s).";
-                }
-                armed = false;
-            }
-            if (!armed) ImGui.EndDisabled();
-        }
-        ImGui.TextWrapped(sweep.Status == "Native retainer scan has not been run." ? status : sweep.Status);
+        ImGui.TextWrapped("Automatic row sweep disabled for safety. Use Guided open-retainer price audit in PentaPenta.");
     }
 }

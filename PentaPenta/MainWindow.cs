@@ -53,7 +53,6 @@ internal sealed class MainWindow : Window
     private string singleRepriceStatus = "";
     private PendingPriceVerification? pendingPriceVerification;
     private bool armRetainerSweep;
-    private bool armNativeRetainerScan;
     private bool retainerSweepActive;
     private List<RetainerRepricePlan> retainerSweepPlans = [];
     private int retainerSweepIndex;
@@ -90,7 +89,6 @@ internal sealed class MainWindow : Window
         autoRetainerPricing.AutomaticListingAuditStarted += StartAutomaticListingAudit;
         autoRetainerPricing.AutomaticListingAuditCaptured += RecordListingAuditCapture;
         retainerNativePriceSweep.Captured += RecordNativeMarketCapture;
-        retainerPricingOverlay.Captured += OnRetainerPricingOverlayCaptured;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 500), MaximumSize = new Vector2(float.MaxValue) };
         Refresh();
     }
@@ -288,34 +286,7 @@ internal sealed class MainWindow : Window
         ImGui.TextDisabled(pricingStatus);
         DrawMarketBoardReceiveDiagnostic();
 
-        var retainerWindowOpen = !services.GameGui.GetAddonByName("RetainerSellList").IsNull;
-        if (!retainerWindowOpen || retainerNativePriceSweep.IsRunning) ImGui.BeginDisabled();
-        ImGui.Checkbox("Arm native retainer scan", ref armNativeRetainerScan);
-        ImGui.SameLine();
-        var nativeScanWasArmed = armNativeRetainerScan;
-        if (!nativeScanWasArmed) ImGui.BeginDisabled();
-        if (ImGui.Button(retainerNativePriceSweep.IsRunning ? "Scanning retainer..." : "Sweep open retainer prices"))
-        {
-            var freshCapture = retainerListings.Capture(config.PentameldPricingWatchList);
-            retainerCapture = freshCapture;
-            RecordListingAuditCapture(freshCapture);
-            if (freshCapture.Listings.Count > 0)
-            {
-                var exclusions = config.PentameldPricingOwnRetainers
-                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                retainerNativePriceSweep.Start(freshCapture, config.PentameldPricingWatchList, exclusions, config.PentameldPricingUndercutGil);
-            }
-            armNativeRetainerScan = false;
-        }
-        if (!nativeScanWasArmed) ImGui.EndDisabled();
-        if (!retainerWindowOpen || retainerNativePriceSweep.IsRunning) ImGui.EndDisabled();
-        if (retainerNativePriceSweep.IsRunning)
-        {
-            ImGui.SameLine();
-            if (ImGui.Button("Stop native scan")) retainerNativePriceSweep.Stop();
-        }
-        ImGui.TextDisabled(retainerNativePriceSweep.Status);
+        ImGui.TextDisabled("Automatic native retainer-row sweep is disabled for safety.");
         DrawGuidedMarketAudit();
 
         if (ImGui.CollapsingHeader($"Add items & settings ({config.PentameldPricingWatchList.Count} watched)"))
@@ -809,12 +780,6 @@ internal sealed class MainWindow : Window
             autoRetainerPricing.CompleteAutomaticListingAudit();
             listingAuditStatus = $"AUTOMATIC AUDIT COMPLETE: captured all {expectedNames.Count} configured retainers and character inventory.";
         }
-    }
-
-    private void OnRetainerPricingOverlayCaptured(RetainerListingCapture capture)
-    {
-        retainerCapture = capture;
-        RecordListingAuditCapture(capture);
     }
 
     private void StartAutomaticListingAudit() => StartListingAudit(true);

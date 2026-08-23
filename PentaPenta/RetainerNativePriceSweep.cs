@@ -34,6 +34,9 @@ internal sealed class RetainerNativePriceSweep : IDisposable
         IReadOnlySet<string> exclusions,
         int undercut)
     {
+        Status = "Native retainer row sweep is disabled for safety. Use the guided market audit instead.";
+        return;
+#pragma warning disable CS0162
         if (services.GameGui.GetAddonByName("RetainerSellList").IsNull)
         {
             Status = "Open the retainer Items for Sale window before starting.";
@@ -53,6 +56,7 @@ internal sealed class RetainerNativePriceSweep : IDisposable
         nextAction = DateTime.UtcNow.AddSeconds(1);
         rowReadyDeadline = DateTime.UtcNow.AddSeconds(8);
         Status = $"Native scan started for {capture.RetainerName}: 0/{listings.Count}. Do not interact with the retainer or market windows.";
+#pragma warning restore CS0162
     }
 
     internal void Stop(string reason = "Stopped by user.")
@@ -79,27 +83,20 @@ internal sealed class RetainerNativePriceSweep : IDisposable
                 var addon = services.GameGui.GetAddonByName<AtkUnitBase>("RetainerSellList");
                 if (addon == null || !addon->IsReady) { Stop("Items for Sale closed or was not ready."); return; }
                 var list = FindPrimaryList(addon, out var detectedLists, out var largestCount);
-                var selected = false;
-                var directRows = 0;
                 if (list != null && listing.RowIndex >= 0 && listing.RowIndex < list->GetItemCount())
                 {
                     list->SelectItem(listing.RowIndex, true);
                     list->DispatchItemEvent(listing.RowIndex, AtkEventType.ListItemClick);
-                    selected = true;
                 }
                 else
                 {
-                    selected = TryInvokeDirectRow(addon, listing.RowIndex, out directRows);
-                }
-                if (!selected)
-                {
                     if (DateTime.UtcNow < rowReadyDeadline)
                     {
-                        Status = $"Waiting for retainer row {listing.RowIndex + 1} ({detectedLists} list component(s), {directRows} direct row event(s))...";
+                        Status = $"Waiting for retainer list row {listing.RowIndex + 1} ({detectedLists} list component(s), largest count {largestCount})...";
                         nextAction = DateTime.UtcNow.AddMilliseconds(500);
                         return;
                     }
-                    Stop($"Could not invoke row {listing.RowIndex + 1} for {listing.Name}; detected {detectedLists} list component(s), largest count {largestCount}, {directRows} direct row event(s).");
+                    Stop($"Could not verify list row {listing.RowIndex + 1} for {listing.Name}; detected {detectedLists} list component(s), largest count {largestCount}.");
                     return;
                 }
                 phase = SweepPhase.OpenCompare;
@@ -158,57 +155,6 @@ internal sealed class RetainerNativePriceSweep : IDisposable
                 Status = $"Captured {listing.Name}; {index}/{listings.Count}.";
                 break;
             }
-        }
-    }
-
-    private static unsafe bool TryInvokeDirectRow(AtkUnitBase* addon, int rowIndex, out int rowCount)
-    {
-        var rows = new List<(nint Event, uint Param, float Y)>();
-        var visitedManagers = new HashSet<nint>();
-        var visitedEvents = new HashSet<nint>();
-        FindDirectRowsRecursive(&addon->UldManager, 0, visitedManagers, visitedEvents, rows);
-
-        // Most RetainerSellList builds expose the actual sale-slot index as the event
-        // parameter. Prefer that stable identity; only use screen order when every
-        // discovered handler uses the same parameter.
-        var exact = rows.FirstOrDefault(x => x.Param == (uint)rowIndex);
-        var distinctParams = rows.Select(x => x.Param).Distinct().Count();
-        var ordered = rows.OrderBy(x => x.Y).ThenBy(x => x.Param).ToList();
-        var chosen = exact.Event != 0
-            ? exact
-            : distinctParams <= 1 && rowIndex >= 0 && rowIndex < ordered.Count
-                ? ordered[rowIndex]
-                : default;
-        rowCount = rows.Count;
-        if (chosen.Event == 0) return false;
-        var chosenEvent = (AtkEvent*)chosen.Event;
-        addon->ReceiveEvent(chosenEvent->State.EventType, (int)chosenEvent->Param, chosenEvent);
-        return true;
-    }
-
-    private static unsafe void FindDirectRowsRecursive(
-        AtkUldManager* manager,
-        int depth,
-        HashSet<nint> visitedManagers,
-        HashSet<nint> visitedEvents,
-        List<(nint Event, uint Param, float Y)> rows)
-    {
-        if (manager == null || manager->NodeList == null || depth > 8 || !visitedManagers.Add((nint)manager)) return;
-        for (var i = 0; i < manager->NodeListCount; i++)
-        {
-            var node = manager->NodeList[i];
-            if (node == null) continue;
-            var evt = node->AtkEventManager.Event;
-            while (evt != null)
-            {
-                if (evt->State.EventType == AtkEventType.ListItemClick && visitedEvents.Add((nint)evt))
-                    rows.Add(((nint)evt, evt->Param, node->Y));
-                evt = evt->NextEvent;
-            }
-            if (node->Type != NodeType.Component) continue;
-            var component = node->GetAsAtkComponentNode()->Component;
-            if (component != null)
-                FindDirectRowsRecursive(&component->UldManager, depth + 1, visitedManagers, visitedEvents, rows);
         }
     }
 
