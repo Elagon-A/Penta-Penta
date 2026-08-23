@@ -5,7 +5,7 @@ namespace PentaPenta;
 [Serializable]
 public sealed class Configuration : IPluginConfiguration
 {
-    public int Version { get; set; } = 2;
+    public int Version { get; set; } = 3;
     public bool StrictNoOvercap { get; set; } = true;
     public float UiCooldownSeconds { get; set; } = 2.5f;
     public bool EnableMarketBoardOverlay { get; set; } = true;
@@ -44,19 +44,14 @@ public sealed class CraftingMeldPreset
 {
     // Defaults to true so presets saved by versions before 0.1.25 remain active.
     public bool Enabled { get; set; } = true;
-    public List<CraftingMateria> Slots { get; set; } =
-    [
-        CraftingMateria.None, CraftingMateria.None, CraftingMateria.None,
-        CraftingMateria.None, CraftingMateria.None,
-    ];
+    // Keep collection initializers empty. Newtonsoft populates existing collection
+    // instances during load; seeding five values here used to prepend five empty
+    // slots on every plugin reload.
+    public List<CraftingMateria> Slots { get; set; } = [];
 }
 
 public sealed class CraftingMeldTemplate
 {
     public string Name { get; set; } = "New template";
-    public List<CraftingMateria> Slots { get; set; } =
-    [
-        CraftingMateria.None, CraftingMateria.None, CraftingMateria.None,
-        CraftingMateria.None, CraftingMateria.None,
-    ];
+    public List<CraftingMateria> Slots { get; set; } = [];
 }

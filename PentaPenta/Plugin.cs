@@ -37,6 +37,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         services = new Services(pi, commands, framework, inventory, data, gameGui, addonLifecycle, clientState, condition, objects, contextMenu, marketBoard, log);
         var config = pi.GetPluginConfig() as Configuration ?? new Configuration();
+        if (NormalizeCraftingConfiguration(config)) pi.SavePluginConfig(config);
         var scanner = new InventoryScanner(services);
         controller = new Melding.MeldController(services, config);
         pricing = new PentameldPricingService();
@@ -56,6 +57,46 @@ public sealed class Plugin : IDalamudPlugin
         services.ContextMenu.OnMenuOpened += OnContextMenuOpened;
         pi.UiBuilder.Draw += windows.Draw;
         pi.UiBuilder.OpenMainUi += main.Toggle;
+    }
+
+    private static bool NormalizeCraftingConfiguration(Configuration config)
+    {
+        var changed = config.Version < 3;
+        config.CraftingPresets ??= [];
+        config.CraftingMeldTemplates ??= [];
+        foreach (var preset in config.CraftingPresets.Values)
+            changed |= NormalizeSlots(preset);
+        foreach (var template in config.CraftingMeldTemplates)
+            changed |= NormalizeSlots(template);
+        if (config.Version != 3)
+        {
+            config.Version = 3;
+            changed = true;
+        }
+        return changed;
+    }
+
+    private static bool NormalizeSlots(CraftingMeldPreset preset)
+    {
+        var normalized = NormalizeSlots(preset.Slots);
+        if (preset.Slots is { Count: 5 } && preset.Slots.SequenceEqual(normalized)) return false;
+        preset.Slots = normalized;
+        return true;
+    }
+
+    private static bool NormalizeSlots(CraftingMeldTemplate template)
+    {
+        var normalized = NormalizeSlots(template.Slots);
+        if (template.Slots is { Count: 5 } && template.Slots.SequenceEqual(normalized)) return false;
+        template.Slots = normalized;
+        return true;
+    }
+
+    private static List<CraftingMateria> NormalizeSlots(IReadOnlyCollection<CraftingMateria>? slots)
+    {
+        var values = slots?.TakeLast(5).ToList() ?? [];
+        while (values.Count < 5) values.Add(CraftingMateria.None);
+        return values;
     }
 
     public void Dispose()
