@@ -345,6 +345,7 @@ internal sealed class MainWindow : Window
         }
 
         ImGui.Separator();
+        DrawAuditPricingFindings();
         if (retainerCapture is { } capture)
         {
             ImGui.TextWrapped(capture.Status);
@@ -443,6 +444,50 @@ internal sealed class MainWindow : Window
             pricingResults = pricingResults.Where(x => x.ItemId != id || x.Hq != removeHq).ToList();
             SaveConfig();
         }
+    }
+
+    private void DrawAuditPricingFindings()
+    {
+        if (listingAuditSnapshots.Count == 0) return;
+        var findings = listingAuditSnapshots
+            .SelectMany(snapshot => snapshot.Value.Select(listing => new AuditPriceFinding(snapshot.Key, listing, FindProposal(listing))))
+            .Where(x => x.ProposedPrice is > 0 && (ulong)x.ProposedPrice.Value != x.Listing.CurrentPrice)
+            .OrderBy(x => x.RetainerName)
+            .ThenBy(x => x.Listing.Name)
+            .ToList();
+        var capturedCount = listingAuditSnapshots.Values.Sum(x => x.Count);
+        if (!ImGui.CollapsingHeader($"Audit price changes ({findings.Count})", ImGuiTreeNodeFlags.DefaultOpen)) return;
+        ImGui.TextDisabled($"Across {listingAuditSnapshots.Count} captured retainer(s); showing only valid changed proposals from {capturedCount} watched 5/5 listing(s).");
+        if (pricingScanTask is { IsCompleted: false })
+            ImGui.TextDisabled("Refreshing market prices for the audit...");
+        if (findings.Count == 0)
+        {
+            ImGui.TextDisabled(pricingScanTask is { IsCompleted: false }
+                ? "Findings will appear as prices finish loading."
+                : "No captured listing currently needs a valid proposed price change.");
+            return;
+        }
+
+        if (!ImGui.BeginTable("audit-price-findings", 4,
+                ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY,
+                new Vector2(0, Math.Min(260, 28 + findings.Count * 24)))) return;
+        ImGui.TableSetupColumn("Retainer", ImGuiTableColumnFlags.WidthFixed, 130);
+        ImGui.TableSetupColumn("Item");
+        ImGui.TableSetupColumn("Current", ImGuiTableColumnFlags.WidthFixed, 110);
+        ImGui.TableSetupColumn("Proposed", ImGuiTableColumnFlags.WidthFixed, 110);
+        ImGui.TableHeadersRow();
+        foreach (var finding in findings)
+        {
+            ImGui.TableNextRow();
+            var needsChangeColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.75f, 0.08f, 0.08f, 0.42f));
+            ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0, needsChangeColor);
+            ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg1, needsChangeColor);
+            ImGui.TableNextColumn(); ImGui.TextUnformatted(finding.RetainerName);
+            ImGui.TableNextColumn(); ImGui.TextUnformatted(finding.Listing.Name + (finding.Listing.Hq ? " ★" : ""));
+            ImGui.TableNextColumn(); ImGui.TextUnformatted($"{finding.Listing.CurrentPrice:N0} gil");
+            ImGui.TableNextColumn(); ImGui.TextUnformatted(FormatGil(finding.ProposedPrice));
+        }
+        ImGui.EndTable();
     }
 
     private void DrawListingCoverageAudit()
@@ -601,6 +646,8 @@ internal sealed class MainWindow : Window
         foreach (var item in scanner.Scan())
             if (watched.Contains((item.ItemId, item.Hq))) listingAuditCharacterItems.Add((item.ItemId, item.Hq));
         listingAuditActive = true;
+        if (automatic && pricingScanTask is null && config.PentameldPricingWatchList.Count > 0)
+            StartPricingScan();
         listingAuditStatus = automatic
             ? $"Automatic audit started through AutoRetainer. Character bags contain {listingAuditCharacterItems.Count} watched item type(s)."
             : $"Audit started. Character bags contain {listingAuditCharacterItems.Count} watched item type(s). Open each retainer's Items for Sale window and capture it.";
@@ -1054,6 +1101,7 @@ internal sealed class MainWindow : Window
     private sealed record PricingCatalogItem(uint ItemId, string Name);
     private sealed record PendingPriceVerification(CapturedRetainerListing Listing, uint ExpectedPrice, DateTime Deadline, bool IsSweep);
     private sealed record RetainerRepricePlan(CapturedRetainerListing Listing, uint ProposedPrice);
+    private sealed record AuditPriceFinding(string RetainerName, CapturedRetainerListing Listing, int? ProposedPrice);
     private sealed record ArtisanListItem(uint ID, int Quantity, ArtisanListItemOptions ListItemOptions);
     private sealed record ArtisanListItemOptions(bool NQOnly, bool Skipping);
     private sealed record ArtisanCraftingList(
