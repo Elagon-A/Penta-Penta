@@ -1,4 +1,4 @@
-using FFXIVClientStructs.FFXIV.Client.UI.Agent;
+using FFXIVClientStructs.FFXIV.Client.UI.Info;
 
 namespace PentaPenta;
 
@@ -12,11 +12,14 @@ internal sealed class NativeMarketPricingScanner(Services services)
         if (services.GameGui.GetAddonByName("ItemSearchResult").IsNull)
             return new([], "Open an item's native Search Results window before capturing.");
 
-        var module = AgentModule.Instance();
-        var agent = module == null ? null : (AgentItemSearch*)module->GetAgentByInternalId(AgentId.ItemSearch);
-        var proxy = agent == null ? null : agent->InfoProxyItemSearch;
-        if (agent == null || proxy == null || proxy->WaitingForListings || proxy->SearchItemId == 0)
-            return new([], "The native Search Results data is not ready yet.");
+        var infoModule = InfoModule.Instance();
+        var proxy = infoModule == null ? null : infoModule->GetInfoProxyItemSearch();
+        if (proxy == null)
+            return new([], "The native marketboard information service was unavailable.");
+        if (proxy->SearchItemId == 0)
+            return new([], $"The native result item ID was not ready (listings={proxy->ListingCount}, waiting={proxy->WaitingForListings}).");
+        if (proxy->ListingCount == 0)
+            return new([], $"The native result list is empty for item {proxy->SearchItemId} (waiting={proxy->WaitingForListings}).");
 
         var watched = watchList.Where(x => x.ItemId == proxy->SearchItemId).ToList();
         if (watched.Count == 0)
