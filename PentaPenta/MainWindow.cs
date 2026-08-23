@@ -10,10 +10,19 @@ namespace PentaPenta;
 
 internal sealed class MainWindow : Window
 {
-    private static readonly string[] CraftingMateriaLabels =
+    private static readonly (CraftingMateria Value, string Label)[] DohMateriaChoices =
     [
-        "Not set", "Craftsmanship XII", "Craftsmanship XI", "Control XII",
-        "Control XI", "CP XII", "CP XI",
+        (CraftingMateria.None, "Not set"),
+        (CraftingMateria.CraftsmanshipXII, "Craftsmanship XII"), (CraftingMateria.CraftsmanshipXI, "Craftsmanship XI"),
+        (CraftingMateria.ControlXII, "Control XII"), (CraftingMateria.ControlXI, "Control XI"),
+        (CraftingMateria.CpXII, "CP XII"), (CraftingMateria.CpXI, "CP XI"),
+    ];
+    private static readonly (CraftingMateria Value, string Label)[] DolMateriaChoices =
+    [
+        (CraftingMateria.None, "Not set"),
+        (CraftingMateria.GatheringXII, "Gathering XII"), (CraftingMateria.GatheringXI, "Gathering XI"),
+        (CraftingMateria.PerceptionXII, "Perception XII"), (CraftingMateria.PerceptionXI, "Perception XI"),
+        (CraftingMateria.GpXII, "GP XII"), (CraftingMateria.GpXI, "GP XI"),
     ];
     private readonly Services services;
     private readonly Configuration config;
@@ -191,6 +200,7 @@ internal sealed class MainWindow : Window
 
         ImGui.Text("Plan: Critical Hit  >  Direct Hit  >  Determination");
         ImGui.Text("DoH default: Craftsmanship  >  CP  >  Control");
+        ImGui.Text("DoL default: Gathering  >  GP  >  Perception");
         ImGui.TextDisabled("Grade XII: native slots + first overmeld   |   later slots: grade XI   |   strict no-overcap");
         ImGui.Separator();
         ImGui.TextWrapped($"Status: {controller.Status}");
@@ -1102,9 +1112,10 @@ internal sealed class MainWindow : Window
         }
         if (selectedItems.Count != 1) return;
         var item = selectedItems[0];
+        if (!item.IsCraftingGear && !item.IsGatheringGear) return;
         config.CraftingPresets.TryGetValue(item.ItemId, out var preset);
         var enabled = preset?.Enabled ?? false;
-        if (ImGui.Checkbox($"Use exact crafting preset for {item.Name}", ref enabled))
+        if (ImGui.Checkbox($"Use exact {(item.IsGatheringGear ? "gathering" : "crafting")} preset for {item.Name}", ref enabled))
         {
             if (preset is null)
             {
@@ -1124,10 +1135,10 @@ internal sealed class MainWindow : Window
         {
             ImGui.PushID($"craft-preset-{i}");
             ImGui.SetNextItemWidth(210);
-            var value = (int)preset.Slots[i];
-            if (ImGui.Combo($"Slot {i + 1}", ref value, CraftingMateriaLabels, CraftingMateriaLabels.Length))
+            var slotChoice = preset.Slots[i];
+            if (DrawMateriaChoice($"Slot {i + 1}", ref slotChoice, item.IsGatheringGear))
             {
-                preset.Slots[i] = (CraftingMateria)value;
+                preset.Slots[i] = slotChoice;
                 services.PluginInterface.SavePluginConfig(config);
             }
             ImGui.PopID();
@@ -1151,11 +1162,15 @@ internal sealed class MainWindow : Window
 
     private void DrawCraftingTemplateLibrary(IReadOnlyList<InventoryGear> selectedItems)
     {
-        if (!ImGui.CollapsingHeader($"Crafting meld templates ({config.CraftingMeldTemplates.Count})")) return;
+        var gathering = selectedItems.Count > 0 && selectedItems.All(x => x.IsGatheringGear);
+        var discipline = gathering ? MeldTemplateDiscipline.Gathering : MeldTemplateDiscipline.Crafting;
+        var relevantItems = selectedItems.Where(x => gathering ? x.IsGatheringGear : x.IsCraftingGear).ToList();
+        var templates = config.CraftingMeldTemplates.Where(x => x.Discipline == discipline).ToList();
+        if (!ImGui.CollapsingHeader($"{(gathering ? "Gathering" : "Crafting")} meld templates ({templates.Count})")) return;
         ImGui.TextDisabled("Save a five-slot plan once, then assign it to every checked item type.");
 
-        var sourcePreset = selectedItems.Count == 1
-            && config.CraftingPresets.TryGetValue(selectedItems[0].ItemId, out var exactPreset)
+        var sourcePreset = relevantItems.Count == 1
+            && config.CraftingPresets.TryGetValue(relevantItems[0].ItemId, out var exactPreset)
             && exactPreset.Slots.Take(5).All(x => x != CraftingMateria.None)
                 ? exactPreset
                 : null;
@@ -1166,19 +1181,21 @@ internal sealed class MainWindow : Window
         if (ImGui.Button("Save selected item's plan as template"))
         {
             var name = newCraftingTemplateName.Trim();
-            if (name.Length == 0) name = selectedItems[0].Name;
-            var existing = config.CraftingMeldTemplates.FindIndex(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-            var template = new CraftingMeldTemplate { Name = name, Slots = CloneSlots(sourcePreset!.Slots) };
+            if (name.Length == 0) name = relevantItems[0].Name;
+            var existing = config.CraftingMeldTemplates.FindIndex(x => x.Discipline == discipline && x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            var template = new CraftingMeldTemplate { Name = name, Discipline = discipline, Slots = CloneSlots(sourcePreset!.Slots) };
             if (existing >= 0)
             {
                 config.CraftingMeldTemplates[existing] = template;
-                selectedCraftingTemplate = existing;
+                templates = config.CraftingMeldTemplates.Where(x => x.Discipline == discipline).ToList();
+                selectedCraftingTemplate = templates.FindIndex(x => ReferenceEquals(x, template));
                 presetCopyStatus = $"Updated template {name}.";
             }
             else
             {
                 config.CraftingMeldTemplates.Add(template);
-                selectedCraftingTemplate = config.CraftingMeldTemplates.Count - 1;
+                templates.Add(template);
+                selectedCraftingTemplate = templates.Count - 1;
                 presetCopyStatus = $"Saved template {name}.";
             }
             newCraftingTemplateName = "";
@@ -1186,33 +1203,33 @@ internal sealed class MainWindow : Window
         }
         if (sourcePreset is null) ImGui.EndDisabled();
 
-        if (config.CraftingMeldTemplates.Count == 0)
+        if (templates.Count == 0)
         {
             ImGui.TextDisabled("Select one item with a complete exact preset to create your first template.");
             return;
         }
 
-        selectedCraftingTemplate = Math.Clamp(selectedCraftingTemplate, 0, config.CraftingMeldTemplates.Count - 1);
-        var names = config.CraftingMeldTemplates.Select(x => x.Name).ToArray();
+        selectedCraftingTemplate = Math.Clamp(selectedCraftingTemplate, 0, templates.Count - 1);
+        var names = templates.Select(x => x.Name).ToArray();
         ImGui.SetNextItemWidth(260);
         ImGui.Combo("Saved template", ref selectedCraftingTemplate, names, names.Length);
-        var selectedTemplate = config.CraftingMeldTemplates[selectedCraftingTemplate];
+        var selectedTemplate = templates[selectedCraftingTemplate];
         while (selectedTemplate.Slots.Count < 5) selectedTemplate.Slots.Add(CraftingMateria.None);
         for (var i = 0; i < 5; i++)
         {
             ImGui.PushID($"template-slot-{i}");
             ImGui.SetNextItemWidth(210);
-            var value = (int)selectedTemplate.Slots[i];
-            if (ImGui.Combo($"Slot {i + 1}", ref value, CraftingMateriaLabels, CraftingMateriaLabels.Length))
+            var slotChoice = selectedTemplate.Slots[i];
+            if (DrawMateriaChoice($"Slot {i + 1}", ref slotChoice, gathering))
             {
-                selectedTemplate.Slots[i] = (CraftingMateria)value;
+                selectedTemplate.Slots[i] = slotChoice;
                 SaveConfig();
             }
             ImGui.PopID();
         }
 
         var complete = selectedTemplate.Slots.Take(5).All(x => x != CraftingMateria.None);
-        var targetTypes = selectedItems.Select(x => x.ItemId).Distinct().ToList();
+        var targetTypes = relevantItems.Select(x => x.ItemId).Distinct().ToList();
         if (!complete || targetTypes.Count == 0) ImGui.BeginDisabled();
         if (ImGui.Button($"Apply to {targetTypes.Count} checked item type(s)"))
         {
@@ -1226,7 +1243,7 @@ internal sealed class MainWindow : Window
         if (ImGui.Button("Delete template"))
         {
             var deleted = selectedTemplate.Name;
-            config.CraftingMeldTemplates.RemoveAt(selectedCraftingTemplate);
+            config.CraftingMeldTemplates.Remove(selectedTemplate);
             selectedCraftingTemplate = Math.Max(0, selectedCraftingTemplate - 1);
             SaveConfig();
             presetCopyStatus = $"Deleted template {deleted}. Existing item assignments were kept.";
@@ -1242,6 +1259,28 @@ internal sealed class MainWindow : Window
         Enabled = enabled,
         Slots = CloneSlots(source.Slots),
     };
+    private static bool DrawMateriaChoice(string label, ref CraftingMateria value, bool gathering)
+    {
+        var choices = gathering ? DolMateriaChoices : DohMateriaChoices;
+        var preview = "Not set";
+        foreach (var choice in choices)
+            if (choice.Value == value) { preview = choice.Label; break; }
+        var changed = false;
+        if (ImGui.BeginCombo(label, preview))
+        {
+            foreach (var choice in choices)
+            {
+                if (ImGui.Selectable(choice.Label, value == choice.Value))
+                {
+                    value = choice.Value;
+                    changed = true;
+                }
+                if (value == choice.Value) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+        return changed;
+    }
     private static void DrawStockCount(int count)
     {
         var color = count == 0

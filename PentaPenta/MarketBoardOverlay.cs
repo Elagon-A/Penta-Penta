@@ -29,6 +29,12 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         new("Control", 41780, 41767),
         new("CP", 41779, 41766),
     ];
+    private static readonly MarketMateriaRow[] GatheringMateria =
+    [
+        new("Gathering", 41781, 41768),
+        new("Perception", 41782, 41769),
+        new("GP", 41783, 41770),
+    ];
 
     private readonly Services services;
     private readonly Configuration config;
@@ -69,6 +75,7 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         ImGui.TextUnformatted("Click a quantity to view listings.");
         DrawMateriaSection("Battle", BattleMateria);
         DrawMateriaSection("Crafting", CraftingMateria);
+        DrawMateriaSection("Gathering", GatheringMateria);
         ImGui.Separator();
         ImGui.TextDisabled(status);
     }
@@ -393,7 +400,7 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     private void RefreshStockIfDue()
     {
         if (DateTime.UtcNow < nextStockRefresh) return;
-        stock = scanner.ScanItemCounts(BattleMateria.Concat(CraftingMateria)
+        stock = scanner.ScanItemCounts(BattleMateria.Concat(CraftingMateria).Concat(GatheringMateria)
             .SelectMany(x => new[] { x.Grade12ItemId, x.Grade11ItemId }));
         nextStockRefresh = DateTime.UtcNow.AddMilliseconds(500);
     }

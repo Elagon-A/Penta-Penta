@@ -38,7 +38,15 @@ public enum CraftingMateria
     ControlXI,
     CpXII,
     CpXI,
+    GatheringXII,
+    GatheringXI,
+    PerceptionXII,
+    PerceptionXI,
+    GpXII,
+    GpXI,
 }
+
+public enum MeldTemplateDiscipline { Crafting, Gathering }
 
 public sealed class CraftingMeldPreset
 {
@@ -53,5 +61,6 @@ public sealed class CraftingMeldPreset
 public sealed class CraftingMeldTemplate
 {
     public string Name { get; set; } = "New template";
+    public MeldTemplateDiscipline Discipline { get; set; } = MeldTemplateDiscipline.Crafting;
     public List<CraftingMateria> Slots { get; set; } = [];
 }

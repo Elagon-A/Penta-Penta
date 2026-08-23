@@ -29,9 +29,10 @@ internal sealed class InventoryScanner(Services services)
             var jobs = services.Data.GetExcelSheet<ClassJobCategory>().GetRowOrDefault(item.Value.ClassJobCategory.RowId);
             var isCraftingGear = jobs is not null && (jobs.Value.CRP || jobs.Value.BSM || jobs.Value.ARM
                 || jobs.Value.GSM || jobs.Value.LTW || jobs.Value.WVR || jobs.Value.ALC || jobs.Value.CUL);
+            var isGatheringGear = jobs is not null && (jobs.Value.MIN || jobs.Value.BTN || jobs.Value.FSH);
             result.Add(new InventoryGear(slot.BaseItemId, item.Value.Name.ExtractText(), bag,
                 slot.InventorySlot, slot.IsHq, slot.MateriaEntries.Count(x => x.Type.RowId != 0),
-                item.Value.MateriaSlotCount, item.Value.IsAdvancedMeldingPermitted, isCraftingGear));
+                item.Value.MateriaSlotCount, item.Value.IsAdvancedMeldingPermitted, isCraftingGear, isGatheringGear));
         }
         return result.OrderBy(x => x.Name).ThenBy(x => x.Container).ThenBy(x => x.Slot).ToList();
     }
@@ -54,6 +55,9 @@ internal sealed class InventoryScanner(Services services)
             new("Craftsmanship", counts.GetValueOrDefault(41778u), counts.GetValueOrDefault(41765u)),
             new("Control", counts.GetValueOrDefault(41780u), counts.GetValueOrDefault(41767u)),
             new("CP", counts.GetValueOrDefault(41779u), counts.GetValueOrDefault(41766u)),
+            new("Gathering", counts.GetValueOrDefault(41781u), counts.GetValueOrDefault(41768u)),
+            new("Perception", counts.GetValueOrDefault(41782u), counts.GetValueOrDefault(41769u)),
+            new("GP", counts.GetValueOrDefault(41783u), counts.GetValueOrDefault(41770u)),
         ];
     }
 

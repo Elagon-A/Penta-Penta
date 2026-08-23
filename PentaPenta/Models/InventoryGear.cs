@@ -11,4 +11,5 @@ internal sealed record InventoryGear(
     int MeldCount,
     int MateriaSlotCount,
     bool AdvancedMeldingPermitted,
-    bool IsCraftingGear);
+    bool IsCraftingGear,
+    bool IsGatheringGear);

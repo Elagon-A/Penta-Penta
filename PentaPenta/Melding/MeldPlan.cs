@@ -1,6 +1,6 @@
 namespace PentaPenta.Melding;
 
-internal enum MeldStat { CriticalHit, DirectHit, Determination, Craftsmanship, Cp, Control }
+internal enum MeldStat { CriticalHit, DirectHit, Determination, Craftsmanship, Cp, Control, Gathering, Perception, Gp }
 
 internal sealed record MateriaChoice(MeldStat Stat, uint Grade11ItemId, uint Grade12ItemId, int Grade11Gain, int Grade12Gain);
 
@@ -20,7 +20,15 @@ internal static class MeldPlan
         new(MeldStat.Control, 41767, 41780, 15, 23),
     ];
 
-    public static MateriaChoice[] PriorityFor(bool crafting) => crafting ? CraftingPriority : Priority;
+    public static readonly MateriaChoice[] GatheringPriority =
+    [
+        new(MeldStat.Gathering, 41768, 41781, 20, 36),
+        new(MeldStat.Gp, 41770, 41783, 9, 11),
+        new(MeldStat.Perception, 41769, 41782, 20, 36),
+    ];
+
+    public static MateriaChoice[] PriorityFor(bool crafting, bool gathering) =>
+        crafting ? CraftingPriority : gathering ? GatheringPriority : Priority;
 
     // Current-grade materia can be used in every native slot plus the first
     // advanced slot. Later advanced slots require the previous grade.
@@ -35,6 +43,12 @@ internal static class MeldPlan
         CraftingMateria.ControlXI => new("Craftsman's Command Materia XI", 41767, 15, 11),
         CraftingMateria.CpXII => new("Craftsman's Cunning Materia XII", 41779, 11, 12),
         CraftingMateria.CpXI => new("Craftsman's Cunning Materia XI", 41766, 9, 11),
+        CraftingMateria.GatheringXII => new("Gatherer's Guerdon Materia XII", 41781, 36, 12),
+        CraftingMateria.GatheringXI => new("Gatherer's Guerdon Materia XI", 41768, 20, 11),
+        CraftingMateria.PerceptionXII => new("Gatherer's Guile Materia XII", 41782, 36, 12),
+        CraftingMateria.PerceptionXI => new("Gatherer's Guile Materia XI", 41769, 20, 11),
+        CraftingMateria.GpXII => new("Gatherer's Grasp Materia XII", 41783, 11, 12),
+        CraftingMateria.GpXI => new("Gatherer's Grasp Materia XI", 41770, 9, 11),
         _ => null,
     };
 }

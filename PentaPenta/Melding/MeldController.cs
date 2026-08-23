@@ -379,7 +379,7 @@ internal sealed class MeldController : IDisposable
                 }
 
                 autoUsingExactPreset = false;
-                var priority = MeldPlan.PriorityFor(expected.IsCraftingGear);
+                var priority = MeldPlan.PriorityFor(expected.IsCraftingGear, expected.IsGatheringGear);
                 while (autoCandidateIndex < priority.Length
                     && autoRejectedChoices.Contains((autoItemIndex, grade, autoCandidateIndex)))
                 {
@@ -699,6 +699,12 @@ internal sealed class MeldController : IDisposable
         (MeldStat.Cp, 12) => "Craftsman's Cunning Materia XII",
         (MeldStat.Cp, _) => "Craftsman's Cunning Materia XI",
         (MeldStat.Control, 12) => "Craftsman's Command Materia XII",
+        (MeldStat.Gathering, 12) => "Gatherer's Guerdon Materia XII",
+        (MeldStat.Gathering, _) => "Gatherer's Guerdon Materia XI",
+        (MeldStat.Perception, 12) => "Gatherer's Guile Materia XII",
+        (MeldStat.Perception, _) => "Gatherer's Guile Materia XI",
+        (MeldStat.Gp, 12) => "Gatherer's Grasp Materia XII",
+        (MeldStat.Gp, _) => "Gatherer's Grasp Materia XI",
         _ => "Craftsman's Command Materia XI"
     };
 
