@@ -23,6 +23,7 @@ internal sealed class MainWindow : Window
     private readonly AutoRetainerPricingBridge autoRetainerPricing;
     private readonly RetainerListingScanner retainerListings;
     private readonly NativeMarketPricingScanner nativeMarketPricing;
+    private readonly RetainerPriceScanCalibration retainerPriceCalibration;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private List<MateriaStock> materiaStock = [];
@@ -64,10 +65,10 @@ internal sealed class MainWindow : Window
     private string missingItemsFilter = "";
     private string artisanExportStatus = "";
 
-    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing)
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing, RetainerPriceScanCalibration retainerPriceCalibration)
         : base("PentaPenta###PentaPentaMain")
     {
-        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing;
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration;
         pricingCatalog = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
             .Where(x => x.EquipSlotCategory.RowId != 0 && x.MateriaSlotCount > 0 && x.IsAdvancedMeldingPermitted)
             .Select(x => new PricingCatalogItem(x.RowId, x.Name.ExtractText()))
@@ -406,6 +407,12 @@ internal sealed class MainWindow : Window
             if (autoRetainerPricing.IsBusy) ImGui.EndDisabled();
             ImGui.SameLine(); ImGui.TextDisabled("Troubleshooting only; does not invoke AutoRetainer or change prices.");
             ImGui.TextWrapped(autoRetainerPricing.Status);
+            ImGui.Separator();
+            if (retainerPriceCalibration.IsArmed) ImGui.BeginDisabled();
+            if (ImGui.Button(retainerPriceCalibration.IsArmed ? "Calibration armed" : "Calibrate retainer Compare Prices"))
+                retainerPriceCalibration.Arm();
+            if (retainerPriceCalibration.IsArmed) ImGui.EndDisabled();
+            ImGui.TextWrapped(retainerPriceCalibration.Status);
         }
 
         if (!ImGui.CollapsingHeader($"Watchlist ({config.PentameldPricingWatchList.Count})")) return;
