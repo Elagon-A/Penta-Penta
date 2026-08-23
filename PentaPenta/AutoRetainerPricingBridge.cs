@@ -113,7 +113,7 @@ internal sealed class AutoRetainerPricingBridge : IDisposable
         ownsPostprocessSlot = true;
         if (AutomaticListingAuditActive)
         {
-            var capture = retainerListings.CaptureLoadedActiveRetainer(config.PentameldPricingWatchList);
+            var capture = retainerListings.CaptureLoadedActiveRetainer(config.PentameldPricingWatchList, retainerName);
             AutomaticListingAuditCaptured?.Invoke(capture);
         }
         Finish();

@@ -8,10 +8,15 @@ internal sealed class RetainerListingScanner(Services services)
     internal unsafe RetainerListingCapture Capture(IReadOnlyList<PentameldPricingWatchItem> watchList)
         => CaptureLoaded(watchList, true);
 
-    internal unsafe RetainerListingCapture CaptureLoadedActiveRetainer(IReadOnlyList<PentameldPricingWatchItem> watchList)
-        => CaptureLoaded(watchList, false);
+    internal unsafe RetainerListingCapture CaptureLoadedActiveRetainer(
+        IReadOnlyList<PentameldPricingWatchItem> watchList,
+        string expectedRetainerName)
+        => CaptureLoaded(watchList, false, expectedRetainerName);
 
-    private unsafe RetainerListingCapture CaptureLoaded(IReadOnlyList<PentameldPricingWatchItem> watchList, bool requireSaleWindow)
+    private unsafe RetainerListingCapture CaptureLoaded(
+        IReadOnlyList<PentameldPricingWatchItem> watchList,
+        bool requireSaleWindow,
+        string? expectedRetainerName = null)
     {
         if (requireSaleWindow && services.GameGui.GetAddonByName("RetainerSellList").IsNull)
             return new RetainerListingCapture("", [], 0, "Open a retainer's Items for Sale window before capturing.");
@@ -21,9 +26,22 @@ internal sealed class RetainerListingScanner(Services services)
             return new RetainerListingCapture("", [], 0, "The inventory manager was not available.");
         var retainerManager = RetainerManager.Instance();
         var activeRetainer = retainerManager == null ? null : retainerManager->GetActiveRetainer();
-        var retainerName = activeRetainer == null ? "" : activeRetainer->NameString;
+        var liveRetainerName = activeRetainer == null ? "" : activeRetainer->NameString;
+        // AutoRetainer's post-process callback names the retainer whose inventory it
+        // has just loaded. The native active-retainer pointer can lag one transition
+        // behind, so use the callback identity for that path instead of mislabelling
+        // the newly loaded slots with the previous retainer's name.
+        var retainerName = string.IsNullOrWhiteSpace(expectedRetainerName)
+            ? liveRetainerName
+            : expectedRetainerName.Trim();
         if (retainerName.Length == 0)
             return new RetainerListingCapture("", [], 0, "The active retainer identity was not available.");
+        if (expectedRetainerName is not null
+            && liveRetainerName.Length > 0
+            && !string.Equals(liveRetainerName, retainerName, StringComparison.OrdinalIgnoreCase))
+            services.Log.Warning(
+                "[RetainerListingScanner] AutoRetainer identified {ExpectedRetainer}, while the native active pointer still reported {LiveRetainer}; using the AutoRetainer identity.",
+                retainerName, liveRetainerName);
 
         var watched = watchList
             .GroupBy(x => (x.ItemId, x.Hq))
