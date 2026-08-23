@@ -147,6 +147,22 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         status = $"Opening the marketboard for {pendingItemName}...";
     }
 
+    internal bool OpenListingForAudit(uint itemId)
+    {
+        if (!config.EnableMarketBoardOverlay)
+        {
+            status = "Enable the marketboard materia overlay before starting a guided price audit.";
+            return false;
+        }
+        if (pendingItemId != 0)
+        {
+            status = $"Finish the current market operation for {pendingItemName} first.";
+            return false;
+        }
+        QueueListing(itemId);
+        return pendingItemId == itemId;
+    }
+
     private void OnFrameworkUpdate(IFramework _)
     {
         if (!config.EnableMarketBoardOverlay)

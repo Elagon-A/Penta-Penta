@@ -44,9 +44,9 @@ public sealed class Plugin : IDalamudPlugin
         retainerPriceCalibration = new RetainerPriceScanCalibration(services);
         retainerNativePriceSweep = new RetainerNativePriceSweep(services, nativeMarketPricing);
         marketBoardDiagnostic = new MarketBoardReceiveDiagnostic(services);
-        autoRetainerPricing = new AutoRetainerPricingBridge(services, config, pricing, retainerListings);
-        main = new MainWindow(services, config, scanner, controller, pricing, autoRetainerPricing, retainerListings, nativeMarketPricing, retainerPriceCalibration, retainerNativePriceSweep, marketBoardDiagnostic);
         marketBoardOverlay = new MarketBoardOverlay(services, config, scanner);
+        autoRetainerPricing = new AutoRetainerPricingBridge(services, config, pricing, retainerListings);
+        main = new MainWindow(services, config, scanner, controller, pricing, autoRetainerPricing, retainerListings, nativeMarketPricing, retainerPriceCalibration, retainerNativePriceSweep, marketBoardDiagnostic, marketBoardOverlay);
         windows.AddWindow(main);
         windows.AddWindow(marketBoardOverlay);
         services.Commands.AddHandler("/pentapenta", new CommandInfo((_, _) => main.Toggle()) { HelpMessage = "Open PentaPenta." });

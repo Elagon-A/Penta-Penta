@@ -26,6 +26,7 @@ internal sealed class MainWindow : Window
     private readonly RetainerPriceScanCalibration retainerPriceCalibration;
     private readonly RetainerNativePriceSweep retainerNativePriceSweep;
     private readonly MarketBoardReceiveDiagnostic marketBoardDiagnostic;
+    private readonly MarketBoardOverlay marketBoardOverlay;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private List<MateriaStock> materiaStock = [];
@@ -70,11 +71,15 @@ internal sealed class MainWindow : Window
     private DateTimeOffset? observedMarketReceiveAt;
     private DateTime marketAutoCaptureAfter;
     private uint pendingAutoCaptureItemId;
+    private List<uint> guidedMarketAuditItems = [];
+    private int guidedMarketAuditIndex;
+    private bool guidedMarketAuditActive;
+    private string guidedMarketAuditStatus = "Capture an open retainer to begin a guided market audit.";
 
-    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing, RetainerPriceScanCalibration retainerPriceCalibration, RetainerNativePriceSweep retainerNativePriceSweep, MarketBoardReceiveDiagnostic marketBoardDiagnostic)
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing, RetainerPriceScanCalibration retainerPriceCalibration, RetainerNativePriceSweep retainerNativePriceSweep, MarketBoardReceiveDiagnostic marketBoardDiagnostic, MarketBoardOverlay marketBoardOverlay)
         : base("PentaPenta###PentaPentaMain")
     {
-        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration; this.retainerNativePriceSweep = retainerNativePriceSweep; this.marketBoardDiagnostic = marketBoardDiagnostic;
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration; this.retainerNativePriceSweep = retainerNativePriceSweep; this.marketBoardDiagnostic = marketBoardDiagnostic; this.marketBoardOverlay = marketBoardOverlay;
         pricingCatalog = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
             .Where(x => x.EquipSlotCategory.RowId != 0 && x.MateriaSlotCount > 0 && x.IsAdvancedMeldingPermitted)
             .Select(x => new PricingCatalogItem(x.RowId, x.Name.ExtractText()))
@@ -303,6 +308,7 @@ internal sealed class MainWindow : Window
             if (ImGui.Button("Stop native scan")) retainerNativePriceSweep.Stop();
         }
         ImGui.TextDisabled(retainerNativePriceSweep.Status);
+        DrawGuidedMarketAudit();
 
         if (ImGui.CollapsingHeader($"Add items & settings ({config.PentameldPricingWatchList.Count} watched)"))
         {
@@ -518,6 +524,45 @@ internal sealed class MainWindow : Window
             ImGui.TextDisabled("The game/Dalamud result contained no materia; Universalis cannot populate pentameld matches from this upload.");
     }
 
+    private void DrawGuidedMarketAudit()
+    {
+        if (ImGui.CollapsingHeader("Guided open-retainer price audit", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            var canStart = retainerCapture is { Listings.Count: > 0 } && !guidedMarketAuditActive;
+            if (!canStart) ImGui.BeginDisabled();
+            if (ImGui.Button("Start guided audit") && retainerCapture is { Listings.Count: > 0 } capture)
+            {
+                guidedMarketAuditItems = capture.Listings.Select(x => x.ItemId).Distinct().ToList();
+                guidedMarketAuditIndex = 0;
+                guidedMarketAuditActive = guidedMarketAuditItems.Count > 0;
+                guidedMarketAuditStatus = guidedMarketAuditActive
+                    ? $"Ready: 0/{guidedMarketAuditItems.Count}. Open the next item, confirm Search when prompted, and PentaPenta will capture it."
+                    : "The captured retainer had no watched 5/5 items to audit.";
+            }
+            if (!canStart) ImGui.EndDisabled();
+
+            if (guidedMarketAuditActive && guidedMarketAuditIndex < guidedMarketAuditItems.Count)
+            {
+                var itemId = guidedMarketAuditItems[guidedMarketAuditIndex];
+                var name = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(itemId)?.Name.ExtractText() ?? $"Item {itemId}";
+                ImGui.SameLine();
+                if (ImGui.Button($"Open next ({guidedMarketAuditIndex + 1}/{guidedMarketAuditItems.Count})"))
+                {
+                    if (marketBoardOverlay.OpenListingForAudit(itemId))
+                        guidedMarketAuditStatus = $"Opening {name}. Complete the normal market Search prompt; capture is automatic.";
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Stop audit"))
+                {
+                    guidedMarketAuditActive = false;
+                    guidedMarketAuditStatus = $"Stopped at {guidedMarketAuditIndex}/{guidedMarketAuditItems.Count}.";
+                }
+                ImGui.TextUnformatted($"Next: {name}");
+            }
+            ImGui.TextDisabled(guidedMarketAuditStatus);
+        }
+    }
+
     private void PollAutomaticMarketCapture()
     {
         if (!config.AutoCaptureMarketBoardListings) return;
@@ -551,6 +596,21 @@ internal sealed class MainWindow : Window
         }
         RecordNativeMarketCapture(capture);
         pricingStatus = "AUTO-CAPTURED: " + capture.Status;
+        if (guidedMarketAuditActive
+            && guidedMarketAuditIndex < guidedMarketAuditItems.Count
+            && guidedMarketAuditItems[guidedMarketAuditIndex] == expectedItemId)
+        {
+            guidedMarketAuditIndex++;
+            if (guidedMarketAuditIndex >= guidedMarketAuditItems.Count)
+            {
+                guidedMarketAuditActive = false;
+                guidedMarketAuditStatus = $"GUIDED AUDIT COMPLETE: captured {guidedMarketAuditItems.Count}/{guidedMarketAuditItems.Count} item(s). Reopen the retainer and capture it to review price changes.";
+            }
+            else
+            {
+                guidedMarketAuditStatus = $"Captured {guidedMarketAuditIndex}/{guidedMarketAuditItems.Count}. Close Search Results, then open the next item.";
+            }
+        }
     }
 
     private void DrawAuditPricingFindings()
