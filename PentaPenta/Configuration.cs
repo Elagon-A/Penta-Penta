@@ -11,6 +11,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool EnableMarketBoardOverlay { get; set; } = true;
     public List<QueuedItem> Queue { get; set; } = [];
     public Dictionary<uint, CraftingMeldPreset> CraftingPresets { get; set; } = [];
+    public List<CraftingMeldTemplate> CraftingMeldTemplates { get; set; } = [];
     public Dictionary<uint, long> MateriaConsumedHistory { get; set; } = [];
     public List<PentameldPricingWatchItem> PentameldPricingWatchList { get; set; } = [];
     public int PentameldPricingUndercutGil { get; set; } = 1;
@@ -42,6 +43,16 @@ public sealed class CraftingMeldPreset
 {
     // Defaults to true so presets saved by versions before 0.1.25 remain active.
     public bool Enabled { get; set; } = true;
+    public List<CraftingMateria> Slots { get; set; } =
+    [
+        CraftingMateria.None, CraftingMateria.None, CraftingMateria.None,
+        CraftingMateria.None, CraftingMateria.None,
+    ];
+}
+
+public sealed class CraftingMeldTemplate
+{
+    public string Name { get; set; } = "New template";
     public List<CraftingMateria> Slots { get; set; } =
     [
         CraftingMateria.None, CraftingMateria.None, CraftingMateria.None,
