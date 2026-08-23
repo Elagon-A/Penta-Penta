@@ -25,6 +25,7 @@ internal sealed class MainWindow : Window
     private readonly NativeMarketPricingScanner nativeMarketPricing;
     private readonly RetainerPriceScanCalibration retainerPriceCalibration;
     private readonly RetainerNativePriceSweep retainerNativePriceSweep;
+    private readonly MarketBoardReceiveDiagnostic marketBoardDiagnostic;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private List<MateriaStock> materiaStock = [];
@@ -67,10 +68,10 @@ internal sealed class MainWindow : Window
     private string missingItemsFilter = "";
     private string artisanExportStatus = "";
 
-    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing, RetainerPriceScanCalibration retainerPriceCalibration, RetainerNativePriceSweep retainerNativePriceSweep)
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing, RetainerPriceScanCalibration retainerPriceCalibration, RetainerNativePriceSweep retainerNativePriceSweep, MarketBoardReceiveDiagnostic marketBoardDiagnostic)
         : base("PentaPenta###PentaPentaMain")
     {
-        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration; this.retainerNativePriceSweep = retainerNativePriceSweep;
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration; this.retainerNativePriceSweep = retainerNativePriceSweep; this.marketBoardDiagnostic = marketBoardDiagnostic;
         pricingCatalog = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
             .Where(x => x.EquipSlotCategory.RowId != 0 && x.MateriaSlotCount > 0 && x.IsAdvancedMeldingPermitted)
             .Select(x => new PricingCatalogItem(x.RowId, x.Name.ExtractText()))
@@ -267,6 +268,7 @@ internal sealed class MainWindow : Window
         ImGui.SameLine();
         ImGui.Checkbox("Show correctly priced", ref showCorrectlyPriced);
         ImGui.TextDisabled(pricingStatus);
+        DrawMarketBoardReceiveDiagnostic();
 
         if (retainerCapture is not { Listings.Count: > 0 } || retainerNativePriceSweep.IsRunning) ImGui.BeginDisabled();
         ImGui.Checkbox("Arm native retainer scan", ref armNativeRetainerScan);
@@ -481,6 +483,28 @@ internal sealed class MainWindow : Window
             pricingResults = pricingResults.Where(x => x.ItemId != id || x.Hq != removeHq).ToList();
             SaveConfig();
         }
+    }
+
+    private void DrawMarketBoardReceiveDiagnostic()
+    {
+        var received = marketBoardDiagnostic.Latest;
+        if (received is null)
+        {
+            ImGui.TextDisabled("Live market data: no Search Results received since PentaPenta loaded.");
+            return;
+        }
+
+        var name = received.ItemId == 0
+            ? "Unknown item"
+            : services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(received.ItemId)?.Name.ExtractText() ?? $"Item {received.ItemId}";
+        var age = DateTimeOffset.Now - received.ReceivedAt;
+        var color = received.FiveMateriaListings > 0
+            ? new Vector4(0.65f, 1f, 0.65f, 1f)
+            : new Vector4(1f, 0.72f, 0.25f, 1f);
+        ImGui.TextColored(color,
+            $"Live market data: {name} — {received.TotalListings} listing(s), {received.WithMateriaListings} with materia, {received.FiveMateriaListings} verified 5/5 ({FormatDuration(age)} ago)." );
+        if (received.TotalListings > 0 && received.WithMateriaListings == 0)
+            ImGui.TextDisabled("The game/Dalamud result contained no materia; Universalis cannot populate pentameld matches from this upload.");
     }
 
     private void DrawAuditPricingFindings()

@@ -15,6 +15,7 @@ internal sealed class Services(
     ICondition condition,
     IObjectTable objects,
     IContextMenu contextMenu,
+    IMarketBoard marketBoard,
     IPluginLog log)
 {
     internal IDalamudPluginInterface PluginInterface { get; } = pluginInterface;
@@ -28,5 +29,6 @@ internal sealed class Services(
     internal ICondition Condition { get; } = condition;
     internal IObjectTable Objects { get; } = objects;
     internal IContextMenu ContextMenu { get; } = contextMenu;
+    internal IMarketBoard MarketBoard { get; } = marketBoard;
     internal IPluginLog Log { get; } = log;
 }

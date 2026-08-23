@@ -17,6 +17,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly AutoRetainerPricingBridge autoRetainerPricing;
     private readonly RetainerPriceScanCalibration retainerPriceCalibration;
     private readonly RetainerNativePriceSweep retainerNativePriceSweep;
+    private readonly MarketBoardReceiveDiagnostic marketBoardDiagnostic;
 
     public Plugin(
         IDalamudPluginInterface pi,
@@ -30,9 +31,10 @@ public sealed class Plugin : IDalamudPlugin
         ICondition condition,
         IObjectTable objects,
         IContextMenu contextMenu,
+        IMarketBoard marketBoard,
         IPluginLog log)
     {
-        services = new Services(pi, commands, framework, inventory, data, gameGui, addonLifecycle, clientState, condition, objects, contextMenu, log);
+        services = new Services(pi, commands, framework, inventory, data, gameGui, addonLifecycle, clientState, condition, objects, contextMenu, marketBoard, log);
         var config = pi.GetPluginConfig() as Configuration ?? new Configuration();
         var scanner = new InventoryScanner(services);
         controller = new Melding.MeldController(services, config);
@@ -41,8 +43,9 @@ public sealed class Plugin : IDalamudPlugin
         var nativeMarketPricing = new NativeMarketPricingScanner(services);
         retainerPriceCalibration = new RetainerPriceScanCalibration(services);
         retainerNativePriceSweep = new RetainerNativePriceSweep(services, nativeMarketPricing);
+        marketBoardDiagnostic = new MarketBoardReceiveDiagnostic(services);
         autoRetainerPricing = new AutoRetainerPricingBridge(services, config, pricing, retainerListings);
-        main = new MainWindow(services, config, scanner, controller, pricing, autoRetainerPricing, retainerListings, nativeMarketPricing, retainerPriceCalibration, retainerNativePriceSweep);
+        main = new MainWindow(services, config, scanner, controller, pricing, autoRetainerPricing, retainerListings, nativeMarketPricing, retainerPriceCalibration, retainerNativePriceSweep, marketBoardDiagnostic);
         marketBoardOverlay = new MarketBoardOverlay(services, config, scanner);
         windows.AddWindow(main);
         windows.AddWindow(marketBoardOverlay);
@@ -63,6 +66,7 @@ public sealed class Plugin : IDalamudPlugin
         autoRetainerPricing.Dispose();
         retainerPriceCalibration.Dispose();
         retainerNativePriceSweep.Dispose();
+        marketBoardDiagnostic.Dispose();
         pricing.Dispose();
         marketBoardOverlay.Dispose();
     }
