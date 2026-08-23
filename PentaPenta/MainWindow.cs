@@ -22,6 +22,7 @@ internal sealed class MainWindow : Window
     private readonly PentameldPricingService pricing;
     private readonly AutoRetainerPricingBridge autoRetainerPricing;
     private readonly RetainerListingScanner retainerListings;
+    private readonly NativeMarketPricingScanner nativeMarketPricing;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private List<MateriaStock> materiaStock = [];
@@ -35,6 +36,7 @@ internal sealed class MainWindow : Window
     private string newCraftingTemplateName = "";
     private Task<IReadOnlyList<PentameldPriceResult>>? pricingScanTask;
     private IReadOnlyList<PentameldPriceResult> pricingResults = [];
+    private readonly Dictionary<(uint ItemId, bool Hq), PentameldPriceResult> nativePricingResults = [];
     private string pricingStatus = "Add checked queue items, then refresh prices.";
     private readonly List<PricingCatalogItem> pricingCatalog;
     private string pricingItemSearch = "";
@@ -62,10 +64,10 @@ internal sealed class MainWindow : Window
     private string missingItemsFilter = "";
     private string artisanExportStatus = "";
 
-    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings)
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing)
         : base("PentaPenta###PentaPentaMain")
     {
-        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings;
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing;
         pricingCatalog = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
             .Where(x => x.EquipSlotCategory.RowId != 0 && x.MateriaSlotCount > 0 && x.IsAdvancedMeldingPermitted)
             .Select(x => new PricingCatalogItem(x.RowId, x.Name.ExtractText()))
@@ -251,6 +253,8 @@ internal sealed class MainWindow : Window
         if (ImGui.Button(scanRunning ? "Refreshing..." : "Refresh market prices")) StartPricingScan();
         if (scanRunning || config.PentameldPricingWatchList.Count == 0) ImGui.EndDisabled();
         ImGui.SameLine();
+        if (ImGui.Button("Capture open Search Results")) CaptureNativeMarketPrices();
+        ImGui.SameLine();
         if (ImGui.Button("Capture open retainer"))
         {
             retainerCapture = retainerListings.Capture(config.PentameldPricingWatchList);
@@ -423,7 +427,7 @@ internal sealed class MainWindow : Window
             foreach (var watch in config.PentameldPricingWatchList.Where(x => watchlistFilter.Length == 0
                          || x.Name.Contains(watchlistFilter, StringComparison.OrdinalIgnoreCase)))
             {
-                var result = pricingResults.FirstOrDefault(x => x.ItemId == watch.ItemId && x.Hq == watch.Hq);
+                var result = FindPricingResult(watch.ItemId, watch.Hq);
                 ImGui.PushID($"pricing-{watch.ItemId}-{watch.Hq}");
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn(); ImGui.TextUnformatted(watch.Name);
@@ -780,9 +784,29 @@ internal sealed class MainWindow : Window
         retainerSweepStatus = $"SWEEP STOPPED after {retainerSweepChanged} change(s): {reason}";
     }
 
-    private int? FindProposal(CapturedRetainerListing listing) => autoRetainerPricing.LastResults
-        .Concat(pricingResults)
-        .FirstOrDefault(x => x.ItemId == listing.ItemId && x.Hq == listing.Hq)?.ProposedPrice;
+    private PentameldPriceResult? FindPricingResult(uint itemId, bool hq)
+    {
+        if (nativePricingResults.TryGetValue((itemId, hq), out var native)) return native;
+        return pricingResults.FirstOrDefault(x => x.ItemId == itemId && x.Hq == hq)
+            ?? autoRetainerPricing.LastResults.FirstOrDefault(x => x.ItemId == itemId && x.Hq == hq);
+    }
+
+    private int? FindProposal(CapturedRetainerListing listing)
+        => FindPricingResult(listing.ItemId, listing.Hq)?.ProposedPrice;
+
+    private void CaptureNativeMarketPrices()
+    {
+        var exclusions = config.PentameldPricingOwnRetainers
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var capture = nativeMarketPricing.Capture(
+            config.PentameldPricingWatchList,
+            exclusions,
+            config.PentameldPricingUndercutGil);
+        foreach (var result in capture.Results)
+            nativePricingResults[(result.ItemId, result.Hq)] = result;
+        pricingStatus = capture.Status;
+    }
 
     private void PollPendingPriceVerification()
     {
