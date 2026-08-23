@@ -79,19 +79,29 @@ internal sealed class RetainerNativePriceSweep : IDisposable
                 var addon = services.GameGui.GetAddonByName<AtkUnitBase>("RetainerSellList");
                 if (addon == null || !addon->IsReady) { Stop("Items for Sale closed or was not ready."); return; }
                 var list = FindPrimaryList(addon, out var detectedLists, out var largestCount);
-                if (list == null || listing.RowIndex < 0 || listing.RowIndex >= list->GetItemCount())
+                var selected = false;
+                var directRows = 0;
+                if (list != null && listing.RowIndex >= 0 && listing.RowIndex < list->GetItemCount())
+                {
+                    list->SelectItem(listing.RowIndex, true);
+                    list->DispatchItemEvent(listing.RowIndex, AtkEventType.ListItemClick);
+                    selected = true;
+                }
+                else
+                {
+                    selected = TryInvokeDirectRow(addon, listing.RowIndex, out directRows);
+                }
+                if (!selected)
                 {
                     if (DateTime.UtcNow < rowReadyDeadline)
                     {
-                        Status = $"Waiting for retainer list row {listing.RowIndex + 1} ({detectedLists} list component(s), largest count {largestCount})...";
+                        Status = $"Waiting for retainer row {listing.RowIndex + 1} ({detectedLists} list component(s), {directRows} direct row event(s))...";
                         nextAction = DateTime.UtcNow.AddMilliseconds(500);
                         return;
                     }
-                    Stop($"Could not verify list row {listing.RowIndex + 1} for {listing.Name}; detected {detectedLists} list component(s), largest count {largestCount}.");
+                    Stop($"Could not invoke row {listing.RowIndex + 1} for {listing.Name}; detected {detectedLists} list component(s), largest count {largestCount}, {directRows} direct row event(s).");
                     return;
                 }
-                list->SelectItem(listing.RowIndex, true);
-                list->DispatchItemEvent(listing.RowIndex, AtkEventType.ListItemClick);
                 phase = SweepPhase.OpenCompare;
                 nextAction = DateTime.UtcNow.AddSeconds(1);
                 Status = $"Opening Adjust Price for {listing.Name} ({index + 1}/{listings.Count})...";
@@ -101,6 +111,12 @@ internal sealed class RetainerNativePriceSweep : IDisposable
             {
                 var addon = services.GameGui.GetAddonByName<AddonRetainerSell>("RetainerSell");
                 if (addon == null || !addon->IsReady) { Stop($"Adjust Price did not open for {listing.Name}."); return; }
+                var openedName = addon->ItemName == null ? string.Empty : addon->ItemName->NodeText.ToString();
+                if (!NamesMatch(openedName, listing.Name))
+                {
+                    Stop($"Safety stop: row {listing.RowIndex + 1} opened '{openedName}', expected '{listing.Name}'. No market search was sent.");
+                    return;
+                }
                 if (addon->ComparePrices == null || !addon->ComparePrices->IsEnabled)
                 {
                     Stop($"Compare Prices was not available for {listing.Name}.");
@@ -144,6 +160,63 @@ internal sealed class RetainerNativePriceSweep : IDisposable
             }
         }
     }
+
+    private static unsafe bool TryInvokeDirectRow(AtkUnitBase* addon, int rowIndex, out int rowCount)
+    {
+        var rows = new List<(nint Event, uint Param, float Y)>();
+        var visitedManagers = new HashSet<nint>();
+        var visitedEvents = new HashSet<nint>();
+        FindDirectRowsRecursive(&addon->UldManager, 0, visitedManagers, visitedEvents, rows);
+
+        // Most RetainerSellList builds expose the actual sale-slot index as the event
+        // parameter. Prefer that stable identity; only use screen order when every
+        // discovered handler uses the same parameter.
+        var exact = rows.FirstOrDefault(x => x.Param == (uint)rowIndex);
+        var distinctParams = rows.Select(x => x.Param).Distinct().Count();
+        var ordered = rows.OrderBy(x => x.Y).ThenBy(x => x.Param).ToList();
+        var chosen = exact.Event != 0
+            ? exact
+            : distinctParams <= 1 && rowIndex >= 0 && rowIndex < ordered.Count
+                ? ordered[rowIndex]
+                : default;
+        rowCount = rows.Count;
+        if (chosen.Event == 0) return false;
+        var chosenEvent = (AtkEvent*)chosen.Event;
+        addon->ReceiveEvent(chosenEvent->State.EventType, (int)chosenEvent->Param, chosenEvent);
+        return true;
+    }
+
+    private static unsafe void FindDirectRowsRecursive(
+        AtkUldManager* manager,
+        int depth,
+        HashSet<nint> visitedManagers,
+        HashSet<nint> visitedEvents,
+        List<(nint Event, uint Param, float Y)> rows)
+    {
+        if (manager == null || manager->NodeList == null || depth > 8 || !visitedManagers.Add((nint)manager)) return;
+        for (var i = 0; i < manager->NodeListCount; i++)
+        {
+            var node = manager->NodeList[i];
+            if (node == null) continue;
+            var evt = node->AtkEventManager.Event;
+            while (evt != null)
+            {
+                if (evt->State.EventType == AtkEventType.ListItemClick && visitedEvents.Add((nint)evt))
+                    rows.Add(((nint)evt, evt->Param, node->Y));
+                evt = evt->NextEvent;
+            }
+            if (node->Type != NodeType.Component) continue;
+            var component = node->GetAsAtkComponentNode()->Component;
+            if (component != null)
+                FindDirectRowsRecursive(&component->UldManager, depth + 1, visitedManagers, visitedEvents, rows);
+        }
+    }
+
+    private static bool NamesMatch(string opened, string expected)
+        => NormalizeName(opened).Equals(NormalizeName(expected), StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeName(string value)
+        => value.Replace("★", string.Empty, StringComparison.Ordinal).Trim();
 
     private static unsafe AtkComponentList* FindPrimaryList(AtkUnitBase* addon, out int detectedLists, out int largestCount)
     {

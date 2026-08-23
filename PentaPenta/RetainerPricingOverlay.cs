@@ -87,6 +87,6 @@ internal sealed class RetainerPricingOverlay : Window
             }
             if (!armed) ImGui.EndDisabled();
         }
-        ImGui.TextWrapped(sweep.IsRunning ? sweep.Status : status);
+        ImGui.TextWrapped(sweep.Status == "Native retainer scan has not been run." ? status : sweep.Status);
     }
 }
