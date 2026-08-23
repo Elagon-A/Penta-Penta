@@ -27,6 +27,7 @@ internal sealed class MainWindow : Window
     private readonly RetainerNativePriceSweep retainerNativePriceSweep;
     private readonly MarketBoardReceiveDiagnostic marketBoardDiagnostic;
     private readonly MarketBoardOverlay marketBoardOverlay;
+    private readonly RetainerPricingOverlay retainerPricingOverlay;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private List<MateriaStock> materiaStock = [];
@@ -76,10 +77,10 @@ internal sealed class MainWindow : Window
     private bool guidedMarketAuditActive;
     private string guidedMarketAuditStatus = "Capture an open retainer to begin a guided market audit.";
 
-    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing, RetainerPriceScanCalibration retainerPriceCalibration, RetainerNativePriceSweep retainerNativePriceSweep, MarketBoardReceiveDiagnostic marketBoardDiagnostic, MarketBoardOverlay marketBoardOverlay)
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing, RetainerPriceScanCalibration retainerPriceCalibration, RetainerNativePriceSweep retainerNativePriceSweep, MarketBoardReceiveDiagnostic marketBoardDiagnostic, MarketBoardOverlay marketBoardOverlay, RetainerPricingOverlay retainerPricingOverlay)
         : base("PentaPenta###PentaPentaMain")
     {
-        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration; this.retainerNativePriceSweep = retainerNativePriceSweep; this.marketBoardDiagnostic = marketBoardDiagnostic; this.marketBoardOverlay = marketBoardOverlay;
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration; this.retainerNativePriceSweep = retainerNativePriceSweep; this.marketBoardDiagnostic = marketBoardDiagnostic; this.marketBoardOverlay = marketBoardOverlay; this.retainerPricingOverlay = retainerPricingOverlay;
         pricingCatalog = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
             .Where(x => x.EquipSlotCategory.RowId != 0 && x.MateriaSlotCount > 0 && x.IsAdvancedMeldingPermitted)
             .Select(x => new PricingCatalogItem(x.RowId, x.Name.ExtractText()))
@@ -89,6 +90,7 @@ internal sealed class MainWindow : Window
         autoRetainerPricing.AutomaticListingAuditStarted += StartAutomaticListingAudit;
         autoRetainerPricing.AutomaticListingAuditCaptured += RecordListingAuditCapture;
         retainerNativePriceSweep.Captured += RecordNativeMarketCapture;
+        retainerPricingOverlay.Captured += OnRetainerPricingOverlayCaptured;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 500), MaximumSize = new Vector2(float.MaxValue) };
         Refresh();
     }
@@ -807,6 +809,12 @@ internal sealed class MainWindow : Window
             autoRetainerPricing.CompleteAutomaticListingAudit();
             listingAuditStatus = $"AUTOMATIC AUDIT COMPLETE: captured all {expectedNames.Count} configured retainers and character inventory.";
         }
+    }
+
+    private void OnRetainerPricingOverlayCaptured(RetainerListingCapture capture)
+    {
+        retainerCapture = capture;
+        RecordListingAuditCapture(capture);
     }
 
     private void StartAutomaticListingAudit() => StartListingAudit(true);

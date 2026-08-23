@@ -18,6 +18,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly RetainerPriceScanCalibration retainerPriceCalibration;
     private readonly RetainerNativePriceSweep retainerNativePriceSweep;
     private readonly MarketBoardReceiveDiagnostic marketBoardDiagnostic;
+    private readonly RetainerPricingOverlay retainerPricingOverlay;
 
     public Plugin(
         IDalamudPluginInterface pi,
@@ -44,11 +45,13 @@ public sealed class Plugin : IDalamudPlugin
         retainerPriceCalibration = new RetainerPriceScanCalibration(services);
         retainerNativePriceSweep = new RetainerNativePriceSweep(services, nativeMarketPricing);
         marketBoardDiagnostic = new MarketBoardReceiveDiagnostic(services);
+        retainerPricingOverlay = new RetainerPricingOverlay(services, config, retainerListings, retainerNativePriceSweep);
         marketBoardOverlay = new MarketBoardOverlay(services, config, scanner);
         autoRetainerPricing = new AutoRetainerPricingBridge(services, config, pricing, retainerListings);
-        main = new MainWindow(services, config, scanner, controller, pricing, autoRetainerPricing, retainerListings, nativeMarketPricing, retainerPriceCalibration, retainerNativePriceSweep, marketBoardDiagnostic, marketBoardOverlay);
+        main = new MainWindow(services, config, scanner, controller, pricing, autoRetainerPricing, retainerListings, nativeMarketPricing, retainerPriceCalibration, retainerNativePriceSweep, marketBoardDiagnostic, marketBoardOverlay, retainerPricingOverlay);
         windows.AddWindow(main);
         windows.AddWindow(marketBoardOverlay);
+        windows.AddWindow(retainerPricingOverlay);
         services.Commands.AddHandler("/pentapenta", new CommandInfo((_, _) => main.Toggle()) { HelpMessage = "Open PentaPenta." });
         services.ContextMenu.OnMenuOpened += OnContextMenuOpened;
         pi.UiBuilder.Draw += windows.Draw;
