@@ -13,6 +13,7 @@ internal sealed class RetainerNativePriceSweep : IDisposable
     private int undercutGil;
     private int index;
     private DateTime nextAction;
+    private DateTime rowReadyDeadline;
     private SweepPhase phase;
 
     internal bool IsRunning => phase != SweepPhase.Idle;
@@ -49,6 +50,7 @@ internal sealed class RetainerNativePriceSweep : IDisposable
         index = 0;
         phase = SweepPhase.SelectRow;
         nextAction = DateTime.UtcNow.AddSeconds(1);
+        rowReadyDeadline = DateTime.UtcNow.AddSeconds(8);
         Status = $"Native scan started for {capture.RetainerName}: 0/{listings.Count}. Do not interact with the retainer or market windows.";
     }
 
@@ -75,10 +77,16 @@ internal sealed class RetainerNativePriceSweep : IDisposable
             {
                 var addon = services.GameGui.GetAddonByName<AtkUnitBase>("RetainerSellList");
                 if (addon == null || !addon->IsReady) { Stop("Items for Sale closed or was not ready."); return; }
-                var list = FindPrimaryList(addon);
+                var list = FindPrimaryList(addon, out var detectedLists, out var largestCount);
                 if (list == null || listing.RowIndex < 0 || listing.RowIndex >= list->GetItemCount())
                 {
-                    Stop($"Could not verify list row {listing.RowIndex + 1} for {listing.Name}.");
+                    if (DateTime.UtcNow < rowReadyDeadline)
+                    {
+                        Status = $"Waiting for retainer list row {listing.RowIndex + 1} ({detectedLists} list component(s), largest count {largestCount})...";
+                        nextAction = DateTime.UtcNow.AddMilliseconds(500);
+                        return;
+                    }
+                    Stop($"Could not verify list row {listing.RowIndex + 1} for {listing.Name}; detected {detectedLists} list component(s), largest count {largestCount}.");
                     return;
                 }
                 list->SelectItem(listing.RowIndex, true);
@@ -120,28 +128,36 @@ internal sealed class RetainerNativePriceSweep : IDisposable
                 index++;
                 phase = SweepPhase.SelectRow;
                 nextAction = DateTime.UtcNow.AddSeconds(2);
+                rowReadyDeadline = DateTime.UtcNow.AddSeconds(8);
                 Status = $"Captured {listing.Name}; {index}/{listings.Count}.";
                 break;
             }
         }
     }
 
-    private static unsafe AtkComponentList* FindPrimaryList(AtkUnitBase* addon)
+    private static unsafe AtkComponentList* FindPrimaryList(AtkUnitBase* addon, out int detectedLists, out int largestCount)
     {
         AtkComponentList* best = null;
         var bestCount = -1;
+        detectedLists = 0;
         for (var i = 0; i < addon->UldManager.NodeListCount; i++)
         {
             var node = addon->UldManager.NodeList[i];
             if (node == null || node->Type != NodeType.Component) continue;
             var component = node->GetAsAtkComponentNode()->Component;
-            if (component == null || component->GetComponentType() != ComponentType.List) continue;
+            if (component == null) continue;
+            var type = component->GetComponentType();
+            // This addon has used both variants across UI revisions. TreeList derives
+            // from AtkComponentList, so its list base can use the same selection API.
+            if (type != ComponentType.List && type != ComponentType.TreeList) continue;
+            detectedLists++;
             var list = (AtkComponentList*)component;
             var count = list->GetItemCount();
             if (count <= bestCount) continue;
             best = list;
             bestCount = count;
         }
+        largestCount = bestCount;
         return best;
     }
 
