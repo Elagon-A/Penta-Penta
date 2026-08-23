@@ -67,6 +67,9 @@ internal sealed class MainWindow : Window
     private string watchlistFilter = "";
     private string missingItemsFilter = "";
     private string artisanExportStatus = "";
+    private DateTimeOffset? observedMarketReceiveAt;
+    private DateTime marketAutoCaptureAfter;
+    private uint pendingAutoCaptureItemId;
 
     public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing, RetainerPriceScanCalibration retainerPriceCalibration, RetainerNativePriceSweep retainerNativePriceSweep, MarketBoardReceiveDiagnostic marketBoardDiagnostic)
         : base("PentaPenta###PentaPentaMain")
@@ -246,6 +249,7 @@ internal sealed class MainWindow : Window
 
     private void DrawPentameldPricing()
     {
+        PollAutomaticMarketCapture();
         PollPricingScan();
         PollPendingPriceVerification();
         AdvanceRetainerSweep();
@@ -259,6 +263,13 @@ internal sealed class MainWindow : Window
         if (scanRunning || config.PentameldPricingWatchList.Count == 0) ImGui.EndDisabled();
         ImGui.SameLine();
         if (ImGui.Button("Capture open Search Results")) CaptureNativeMarketPrices();
+        ImGui.SameLine();
+        var autoCapture = config.AutoCaptureMarketBoardListings;
+        if (ImGui.Checkbox("Auto-capture browsed listings", ref autoCapture))
+        {
+            config.AutoCaptureMarketBoardListings = autoCapture;
+            SaveConfig();
+        }
         ImGui.SameLine();
         if (ImGui.Button("Capture open retainer"))
         {
@@ -505,6 +516,41 @@ internal sealed class MainWindow : Window
             $"Live market data: {name} — {received.TotalListings} listing(s), {received.WithMateriaListings} with materia, {received.FiveMateriaListings} verified 5/5 ({FormatDuration(age)} ago)." );
         if (received.TotalListings > 0 && received.WithMateriaListings == 0)
             ImGui.TextDisabled("The game/Dalamud result contained no materia; Universalis cannot populate pentameld matches from this upload.");
+    }
+
+    private void PollAutomaticMarketCapture()
+    {
+        if (!config.AutoCaptureMarketBoardListings) return;
+        var received = marketBoardDiagnostic.Latest;
+        if (received is null) return;
+        if (observedMarketReceiveAt != received.ReceivedAt)
+        {
+            observedMarketReceiveAt = received.ReceivedAt;
+            pendingAutoCaptureItemId = received.ItemId;
+            // Listing packets can arrive in multiple chunks. Let the native proxy
+            // finish assembling them before taking the one merged snapshot.
+            marketAutoCaptureAfter = DateTime.UtcNow.AddMilliseconds(900);
+            return;
+        }
+        if (pendingAutoCaptureItemId == 0 || DateTime.UtcNow < marketAutoCaptureAfter) return;
+        if (services.GameGui.GetAddonByName("ItemSearchResult").IsNull) return;
+
+        var expectedItemId = pendingAutoCaptureItemId;
+        pendingAutoCaptureItemId = 0;
+        var exclusions = config.PentameldPricingOwnRetainers
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var capture = nativeMarketPricing.Capture(
+            config.PentameldPricingWatchList,
+            exclusions,
+            config.PentameldPricingUndercutGil);
+        if (capture.Results.Count == 0 || capture.Results.Any(x => x.ItemId != expectedItemId))
+        {
+            pricingStatus = $"Auto-capture skipped item {expectedItemId}: {capture.Status}";
+            return;
+        }
+        RecordNativeMarketCapture(capture);
+        pricingStatus = "AUTO-CAPTURED: " + capture.Status;
     }
 
     private void DrawAuditPricingFindings()
