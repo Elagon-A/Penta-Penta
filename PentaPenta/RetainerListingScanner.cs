@@ -30,16 +30,18 @@ internal sealed class RetainerListingScanner(Services services)
             .ToDictionary(x => x.Key, x => x.First());
         var listings = new List<CapturedRetainerListing>();
         var loadedCount = 0;
+        var rowIndex = 0;
         foreach (ref readonly var slot in services.Inventory.GetInventoryItems(GameInventoryType.RetainerMarket))
         {
             if (slot.IsEmpty) continue;
             loadedCount++;
+            var currentRow = rowIndex++;
             if (!watched.TryGetValue((slot.BaseItemId, slot.IsHq), out var item)) continue;
             var materiaCount = slot.MateriaEntries.Count(x => x.Type.RowId != 0);
             if (materiaCount != 5) continue;
             var currentPrice = manager->GetRetainerMarketPrice((short)slot.InventorySlot);
             listings.Add(new CapturedRetainerListing(
-                slot.BaseItemId, item.Name, slot.IsHq, slot.InventorySlot, materiaCount, currentPrice));
+                slot.BaseItemId, item.Name, slot.IsHq, slot.InventorySlot, currentRow, materiaCount, currentPrice));
         }
 
         var status = $"Captured {listings.Count} watched pentamelded listing(s) from {loadedCount} loaded sale slot(s) on {retainerName}.";
@@ -95,6 +97,7 @@ internal sealed record CapturedRetainerListing(
     string Name,
     bool Hq,
     uint MarketSlot,
+    int RowIndex,
     int MateriaCount,
     ulong CurrentPrice);
 

@@ -24,6 +24,7 @@ internal sealed class MainWindow : Window
     private readonly RetainerListingScanner retainerListings;
     private readonly NativeMarketPricingScanner nativeMarketPricing;
     private readonly RetainerPriceScanCalibration retainerPriceCalibration;
+    private readonly RetainerNativePriceSweep retainerNativePriceSweep;
     private List<InventoryGear> gear = [];
     private readonly HashSet<string> selected = [];
     private List<MateriaStock> materiaStock = [];
@@ -49,6 +50,7 @@ internal sealed class MainWindow : Window
     private string singleRepriceStatus = "";
     private PendingPriceVerification? pendingPriceVerification;
     private bool armRetainerSweep;
+    private bool armNativeRetainerScan;
     private bool retainerSweepActive;
     private List<RetainerRepricePlan> retainerSweepPlans = [];
     private int retainerSweepIndex;
@@ -65,10 +67,10 @@ internal sealed class MainWindow : Window
     private string missingItemsFilter = "";
     private string artisanExportStatus = "";
 
-    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing, RetainerPriceScanCalibration retainerPriceCalibration)
+    public MainWindow(Services services, Configuration config, InventoryScanner scanner, MeldController controller, PentameldPricingService pricing, AutoRetainerPricingBridge autoRetainerPricing, RetainerListingScanner retainerListings, NativeMarketPricingScanner nativeMarketPricing, RetainerPriceScanCalibration retainerPriceCalibration, RetainerNativePriceSweep retainerNativePriceSweep)
         : base("PentaPenta###PentaPentaMain")
     {
-        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration;
+        this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration; this.retainerNativePriceSweep = retainerNativePriceSweep;
         pricingCatalog = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
             .Where(x => x.EquipSlotCategory.RowId != 0 && x.MateriaSlotCount > 0 && x.IsAdvancedMeldingPermitted)
             .Select(x => new PricingCatalogItem(x.RowId, x.Name.ExtractText()))
@@ -77,6 +79,7 @@ internal sealed class MainWindow : Window
             .ToList();
         autoRetainerPricing.AutomaticListingAuditStarted += StartAutomaticListingAudit;
         autoRetainerPricing.AutomaticListingAuditCaptured += RecordListingAuditCapture;
+        retainerNativePriceSweep.Captured += RecordNativeMarketCapture;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(680, 500), MaximumSize = new Vector2(float.MaxValue) };
         Refresh();
     }
@@ -264,6 +267,29 @@ internal sealed class MainWindow : Window
         ImGui.SameLine();
         ImGui.Checkbox("Show correctly priced", ref showCorrectlyPriced);
         ImGui.TextDisabled(pricingStatus);
+
+        if (retainerCapture is not { Listings.Count: > 0 } || retainerNativePriceSweep.IsRunning) ImGui.BeginDisabled();
+        ImGui.Checkbox("Arm native retainer scan", ref armNativeRetainerScan);
+        ImGui.SameLine();
+        var nativeScanWasArmed = armNativeRetainerScan;
+        if (!nativeScanWasArmed) ImGui.BeginDisabled();
+        if (ImGui.Button(retainerNativePriceSweep.IsRunning ? "Scanning retainer..." : "Start native retainer scan")
+            && retainerCapture is { Listings.Count: > 0 } nativeCapture)
+        {
+            var exclusions = config.PentameldPricingOwnRetainers
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            retainerNativePriceSweep.Start(nativeCapture, config.PentameldPricingWatchList, exclusions, config.PentameldPricingUndercutGil);
+            armNativeRetainerScan = false;
+        }
+        if (!nativeScanWasArmed) ImGui.EndDisabled();
+        if (retainerCapture is not { Listings.Count: > 0 } || retainerNativePriceSweep.IsRunning) ImGui.EndDisabled();
+        if (retainerNativePriceSweep.IsRunning)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Stop native scan")) retainerNativePriceSweep.Stop();
+        }
+        ImGui.TextDisabled(retainerNativePriceSweep.Status);
 
         if (ImGui.CollapsingHeader($"Add items & settings ({config.PentameldPricingWatchList.Count} watched)"))
         {
@@ -810,6 +836,13 @@ internal sealed class MainWindow : Window
             config.PentameldPricingWatchList,
             exclusions,
             config.PentameldPricingUndercutGil);
+        foreach (var result in capture.Results)
+            nativePricingResults[(result.ItemId, result.Hq)] = result;
+        pricingStatus = capture.Status;
+    }
+
+    private void RecordNativeMarketCapture(NativeMarketPricingCapture capture)
+    {
         foreach (var result in capture.Results)
             nativePricingResults[(result.ItemId, result.Hq)] = result;
         pricingStatus = capture.Status;

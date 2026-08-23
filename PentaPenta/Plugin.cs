@@ -16,6 +16,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly PentameldPricingService pricing;
     private readonly AutoRetainerPricingBridge autoRetainerPricing;
     private readonly RetainerPriceScanCalibration retainerPriceCalibration;
+    private readonly RetainerNativePriceSweep retainerNativePriceSweep;
 
     public Plugin(
         IDalamudPluginInterface pi,
@@ -39,8 +40,9 @@ public sealed class Plugin : IDalamudPlugin
         var retainerListings = new RetainerListingScanner(services);
         var nativeMarketPricing = new NativeMarketPricingScanner(services);
         retainerPriceCalibration = new RetainerPriceScanCalibration(services);
+        retainerNativePriceSweep = new RetainerNativePriceSweep(services, nativeMarketPricing);
         autoRetainerPricing = new AutoRetainerPricingBridge(services, config, pricing, retainerListings);
-        main = new MainWindow(services, config, scanner, controller, pricing, autoRetainerPricing, retainerListings, nativeMarketPricing, retainerPriceCalibration);
+        main = new MainWindow(services, config, scanner, controller, pricing, autoRetainerPricing, retainerListings, nativeMarketPricing, retainerPriceCalibration, retainerNativePriceSweep);
         marketBoardOverlay = new MarketBoardOverlay(services, config, scanner);
         windows.AddWindow(main);
         windows.AddWindow(marketBoardOverlay);
@@ -60,6 +62,7 @@ public sealed class Plugin : IDalamudPlugin
         controller.Dispose();
         autoRetainerPricing.Dispose();
         retainerPriceCalibration.Dispose();
+        retainerNativePriceSweep.Dispose();
         pricing.Dispose();
         marketBoardOverlay.Dispose();
     }
