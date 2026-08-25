@@ -22,9 +22,9 @@ internal static class MeldPlan
 
     public static readonly MateriaChoice[] GatheringPriority =
     [
-        new(MeldStat.Gathering, 41768, 41781, 20, 36),
-        new(MeldStat.Gp, 41770, 41783, 9, 11),
-        new(MeldStat.Perception, 41769, 41782, 20, 36),
+        new(MeldStat.Gathering, 41762, 41775, 20, 36),
+        new(MeldStat.Gp, 41764, 41777, 9, 11),
+        new(MeldStat.Perception, 41763, 41776, 20, 36),
     ];
 
     public static MateriaChoice[] PriorityFor(bool crafting, bool gathering) =>
@@ -43,12 +43,12 @@ internal static class MeldPlan
         CraftingMateria.ControlXI => new("Craftsman's Command Materia XI", 41767, 15, 11),
         CraftingMateria.CpXII => new("Craftsman's Cunning Materia XII", 41779, 11, 12),
         CraftingMateria.CpXI => new("Craftsman's Cunning Materia XI", 41766, 9, 11),
-        CraftingMateria.GatheringXII => new("Gatherer's Guerdon Materia XII", 41781, 36, 12),
-        CraftingMateria.GatheringXI => new("Gatherer's Guerdon Materia XI", 41768, 20, 11),
-        CraftingMateria.PerceptionXII => new("Gatherer's Guile Materia XII", 41782, 36, 12),
-        CraftingMateria.PerceptionXI => new("Gatherer's Guile Materia XI", 41769, 20, 11),
-        CraftingMateria.GpXII => new("Gatherer's Grasp Materia XII", 41783, 11, 12),
-        CraftingMateria.GpXI => new("Gatherer's Grasp Materia XI", 41770, 9, 11),
+        CraftingMateria.GatheringXII => new("Gatherer's Guerdon Materia XII", 41775, 36, 12),
+        CraftingMateria.GatheringXI => new("Gatherer's Guerdon Materia XI", 41762, 20, 11),
+        CraftingMateria.PerceptionXII => new("Gatherer's Guile Materia XII", 41776, 36, 12),
+        CraftingMateria.PerceptionXI => new("Gatherer's Guile Materia XI", 41763, 20, 11),
+        CraftingMateria.GpXII => new("Gatherer's Grasp Materia XII", 41777, 11, 12),
+        CraftingMateria.GpXI => new("Gatherer's Grasp Materia XI", 41764, 9, 11),
         _ => null,
     };
 }

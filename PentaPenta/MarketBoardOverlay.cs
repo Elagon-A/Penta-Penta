@@ -31,9 +31,9 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     ];
     private static readonly MarketMateriaRow[] GatheringMateria =
     [
-        new("Gathering", 41781, 41768),
-        new("Perception", 41782, 41769),
-        new("GP", 41783, 41770),
+        new("Gathering", 41775, 41762),
+        new("Perception", 41776, 41763),
+        new("GP", 41777, 41764),
     ];
 
     private readonly Services services;

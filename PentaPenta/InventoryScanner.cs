@@ -55,9 +55,9 @@ internal sealed class InventoryScanner(Services services)
             new("Craftsmanship", counts.GetValueOrDefault(41778u), counts.GetValueOrDefault(41765u)),
             new("Control", counts.GetValueOrDefault(41780u), counts.GetValueOrDefault(41767u)),
             new("CP", counts.GetValueOrDefault(41779u), counts.GetValueOrDefault(41766u)),
-            new("Gathering", counts.GetValueOrDefault(41781u), counts.GetValueOrDefault(41768u)),
-            new("Perception", counts.GetValueOrDefault(41782u), counts.GetValueOrDefault(41769u)),
-            new("GP", counts.GetValueOrDefault(41783u), counts.GetValueOrDefault(41770u)),
+            new("Gathering", counts.GetValueOrDefault(41775u), counts.GetValueOrDefault(41762u)),
+            new("Perception", counts.GetValueOrDefault(41776u), counts.GetValueOrDefault(41763u)),
+            new("GP", counts.GetValueOrDefault(41777u), counts.GetValueOrDefault(41764u)),
         ];
     }
 
