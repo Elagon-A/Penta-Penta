@@ -28,6 +28,7 @@ internal sealed class MainWindow : Window
     private readonly Configuration config;
     private readonly InventoryScanner scanner;
     private readonly MeldController controller;
+    private readonly MateriaDiagnostics materiaDiagnostics;
     private readonly PentameldPricingService pricing;
     private readonly AutoRetainerPricingBridge autoRetainerPricing;
     private readonly RetainerListingScanner retainerListings;
@@ -89,6 +90,7 @@ internal sealed class MainWindow : Window
         : base("PentaPenta###PentaPentaMain")
     {
         this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration; this.retainerNativePriceSweep = retainerNativePriceSweep; this.marketBoardDiagnostic = marketBoardDiagnostic; this.marketBoardOverlay = marketBoardOverlay; this.retainerPricingOverlay = retainerPricingOverlay;
+        materiaDiagnostics = new MateriaDiagnostics(services);
         pricingCatalog = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
             .Where(x => x.EquipSlotCategory.RowId != 0 && x.MateriaSlotCount > 0 && x.IsAdvancedMeldingPermitted)
             .Select(x => new PricingCatalogItem(x.RowId, x.Name.ExtractText()))
@@ -228,6 +230,17 @@ internal sealed class MainWindow : Window
         ImGui.SameLine();
         if (ImGui.Button("Stop")) controller.Stop();
         ImGui.TextDisabled("Keep Materia Melding open and do not interact with either window while the queue is running.");
+
+        if (ImGui.CollapsingHeader("Materia retrieval queue (calibration)"))
+        {
+            var selectedWithMateria = gear.Count(x => selected.Contains(Key(x)) && x.MeldCount > 0);
+            var retrievals = gear.Where(x => selected.Contains(Key(x))).Sum(x => x.MeldCount);
+            ImGui.TextWrapped($"Selected items containing materia: {selectedWithMateria}; retrieval attempts: {retrievals}.");
+            ImGui.TextDisabled("Retrieval can fail and destroy the selected materia. This calibration is read-only and sends no callback.");
+            if (ImGui.Button("Capture open retrieval dialog map")) materiaDiagnostics.CaptureRetrieval();
+            ImGui.SameLine();
+            ImGui.TextWrapped(materiaDiagnostics.LastResult);
+        }
     }
 
     private void DrawMateriaHistory()

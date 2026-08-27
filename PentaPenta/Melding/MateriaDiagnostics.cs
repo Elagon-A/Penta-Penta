@@ -30,6 +30,29 @@ internal sealed class MateriaDiagnostics(Services services)
         }
     }
 
+    public unsafe void CaptureRetrieval()
+    {
+        try
+        {
+            var captured = new List<string>();
+            if (CaptureAddon("MateriaRetrieveDialog")) captured.Add("MateriaRetrieveDialog");
+            if (CaptureAddon("SelectYesno")) captured.Add("SelectYesno");
+
+            if (captured.Count == 0)
+            {
+                LastResult = "No ready Materia Retrieval window found.";
+                return;
+            }
+
+            LastResult = $"Captured {string.Join(" + ", captured)}. See dalamud.log.";
+        }
+        catch (Exception ex)
+        {
+            LastResult = "Retrieval capture failed; see dalamud.log.";
+            services.Log.Error(ex, "PentaPenta Materia Retrieval diagnostic failed");
+        }
+    }
+
     private unsafe bool CaptureAddon(string addonName)
     {
         var addon = services.GameGui.GetAddonByName<AtkUnitBase>(addonName);
