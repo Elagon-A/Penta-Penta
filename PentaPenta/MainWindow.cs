@@ -8,7 +8,7 @@ using PentaPenta.Models;
 
 namespace PentaPenta;
 
-internal sealed class MainWindow : Window
+internal sealed class MainWindow : Window, IDisposable
 {
     private static readonly (CraftingMateria Value, string Label)[] DohMateriaChoices =
     [
@@ -29,6 +29,7 @@ internal sealed class MainWindow : Window
     private readonly InventoryScanner scanner;
     private readonly MeldController controller;
     private readonly MateriaDiagnostics materiaDiagnostics;
+    private readonly MateriaRetrievalController retrievalController;
     private readonly PentameldPricingService pricing;
     private readonly AutoRetainerPricingBridge autoRetainerPricing;
     private readonly RetainerListingScanner retainerListings;
@@ -91,6 +92,7 @@ internal sealed class MainWindow : Window
     {
         this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration; this.retainerNativePriceSweep = retainerNativePriceSweep; this.marketBoardDiagnostic = marketBoardDiagnostic; this.marketBoardOverlay = marketBoardOverlay; this.retainerPricingOverlay = retainerPricingOverlay;
         materiaDiagnostics = new MateriaDiagnostics(services);
+        retrievalController = new MateriaRetrievalController(services);
         pricingCatalog = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
             .Where(x => x.EquipSlotCategory.RowId != 0 && x.MateriaSlotCount > 0 && x.IsAdvancedMeldingPermitted)
             .Select(x => new PricingCatalogItem(x.RowId, x.Name.ExtractText()))
@@ -240,8 +242,23 @@ internal sealed class MainWindow : Window
             if (ImGui.Button("Capture open retrieval dialog map")) materiaDiagnostics.CaptureRetrieval();
             ImGui.SameLine();
             ImGui.TextWrapped(materiaDiagnostics.LastResult);
+            ImGui.Separator();
+            ImGui.TextWrapped($"Guarded test: {retrievalController.Status}");
+            if (ImGui.Button("Prepare one selected item"))
+                retrievalController.Prepare(gear.Where(x => selected.Contains(Key(x))));
+            ImGui.SameLine();
+            if (retrievalController.IsRunning) ImGui.BeginDisabled();
+            if (ImGui.Button("Retrieve one verified materia")) retrievalController.ExecuteOneVerified();
+            if (retrievalController.IsRunning) ImGui.EndDisabled();
+            ImGui.SameLine();
+            if (ImGui.Button("Stop retrieval")) retrievalController.Stop();
+            ImGui.TextDisabled("This test removes only the first displayed materia and never retries automatically.");
         }
     }
+
+    public override void OnClose() => retrievalController.Stop();
+
+    public void Dispose() => retrievalController.Dispose();
 
     private void DrawMateriaHistory()
     {

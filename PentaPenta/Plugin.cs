@@ -106,6 +106,7 @@ public sealed class Plugin : IDalamudPlugin
         services.PluginInterface.UiBuilder.Draw -= windows.Draw;
         services.PluginInterface.UiBuilder.OpenMainUi -= main.Toggle;
         windows.RemoveAllWindows();
+        main.Dispose();
         controller.Dispose();
         autoRetainerPricing.Dispose();
         retainerPriceCalibration.Dispose();
