@@ -3,6 +3,7 @@ using Dalamud.Plugin.Services;
 using Dalamud.Utility;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using Lumina.Excel.Sheets;
 using PentaPenta.Models;
 
@@ -340,11 +341,13 @@ internal sealed class MeldController : IDisposable
             {
                 var main = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttach");
                 if (main == null || !main->IsReady) return;
-                var rows = FindStringRows(main, 147, expected.Name);
+                var rows = FindInventoryEquipmentRows(main, expected);
                 if (rows.Count != 1)
-                { StopAutomaticWithError(rows.Count == 0 ? "Expected equipment is not visible in Materia Melding." : "Duplicate visible equipment names are unsafe in this build."); return; }
-                FireInts(main, 1, rows[0] - 147, 1, 0);
-                services.Log.Information("Auto phase SelectEquipment: row {Row}, item {Item}", rows[0] - 147, expected.Name);
+                { StopAutomaticWithError(rows.Count == 0 ? "Expected bag/slot is not visible in Materia Melding." : "The same bag/slot appeared more than once; selection stopped."); return; }
+                FireInts(main, 1, rows[0], 1, 0);
+                services.Log.Information(
+                    "Auto phase SelectEquipment: row {Row}, item {Item}, container {Container}, slot {Slot}",
+                    rows[0], expected.Name, expected.Container, expected.Slot);
                 autoPhase = AutoPhase.ChooseCandidate;
                 autoNextAction = DateTime.UtcNow.AddSeconds(config.UiCooldownSeconds);
                 autoDeadline = DateTime.UtcNow.AddSeconds(15);
@@ -681,6 +684,57 @@ internal sealed class MeldController : IDisposable
         for (var i = start; i < addon->AtkValuesCount; i++)
             if (AtkString(addon, i).StartsWith(exact, StringComparison.Ordinal)) found.Add(i);
         return found;
+    }
+
+    private unsafe List<int> FindInventoryEquipmentRows(AtkUnitBase* addon, InventoryGear expected)
+    {
+        var matches = new List<int>();
+        var agentModule = AgentModule.Instance();
+        var agent = agentModule == null
+            ? null
+            : (AgentMateriaAttach*)agentModule->GetAgentByInternalId(AgentId.MateriaAttach);
+        if (agent != null && agent->Data != null && agent->Data->ItemArraySorted != null)
+        {
+            var count = Math.Clamp((int)agent->ItemCount, 0, 140);
+            for (var row = 0; row < count; row++)
+            {
+                var entry = agent->Data->ItemArraySorted[row];
+                var live = entry == null ? null : entry->Item;
+                if (live == null) continue;
+                var isHq = (live->Flags & InventoryItem.ItemFlags.HighQuality) != 0;
+                if ((uint)live->Container != (uint)expected.Container
+                    || live->Slot != expected.Slot
+                    || live->ItemId != expected.ItemId
+                    || isHq != expected.Hq)
+                    continue;
+
+                // Retain the displayed-name check as a second, independent guard
+                // before returning the callback row.
+                if (!AtkString(addon, 147 + row).StartsWith(expected.Name, StringComparison.Ordinal))
+                {
+                    services.Log.Warning(
+                        "Materia agent bag/slot matched {Container}/{Slot}, but visible row {Row} did not show {Item}",
+                        expected.Container, expected.Slot, row, expected.Name);
+                    continue;
+                }
+                matches.Add(row);
+            }
+        }
+
+        if (matches.Count > 0) return matches;
+
+        // Older/changed agent layouts may be unavailable. Name-only fallback is
+        // acceptable solely when exactly one visible row exists; duplicates still
+        // stop instead of guessing.
+        var nameRows = FindStringRows(addon, 147, expected.Name);
+        if (nameRows.Count == 1)
+        {
+            services.Log.Warning(
+                "Materia agent bag/slot mapping was unavailable for {Item}; using its single visible name row",
+                expected.Name);
+            matches.Add(nameRows[0] - 147);
+        }
+        return matches;
     }
 
     private unsafe List<int> FindExactStringRows(AtkUnitBase* addon, int start, string exact)
