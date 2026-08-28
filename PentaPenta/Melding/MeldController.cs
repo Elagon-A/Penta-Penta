@@ -57,6 +57,9 @@ internal sealed class MeldController : IDisposable
     private int autoItemIndex;
     private string autoMateriaName = "";
     private int autoExpectedGain;
+    private int autoDetailRow;
+    private int autoDetailOpenAttempts;
+    private DateTime autoDetailLastAttemptAt;
     private bool autoUsingExactPreset;
     private int autoRecoveryAttempts;
     private int autoTotalMelds;
@@ -370,6 +373,9 @@ internal sealed class MeldController : IDisposable
                     if (presetRows.Count != 1)
                     { StopAutomaticWithError($"Could not uniquely locate {autoMateriaName} in Materia Melding."); return; }
                     FireInts(presetMain, 2, presetRows[0] - 429, 1, 0);
+                    autoDetailRow = presetRows[0] - 429;
+                    autoDetailOpenAttempts = 1;
+                    autoDetailLastAttemptAt = DateTime.UtcNow;
                     services.Log.Information("Auto exact preset: row {Row}, materia {Materia}", presetRows[0] - 429, autoMateriaName);
                     autoPhase = AutoPhase.WaitDetail;
                     autoNextAction = DateTime.UtcNow.AddMilliseconds(200);
@@ -402,6 +408,9 @@ internal sealed class MeldController : IDisposable
                 var rows = FindExactStringRows(main, 429, autoMateriaName);
                 if (rows.Count != 1) { autoCandidateIndex++; return; }
                 FireInts(main, 2, rows[0] - 429, 1, 0);
+                autoDetailRow = rows[0] - 429;
+                autoDetailOpenAttempts = 1;
+                autoDetailLastAttemptAt = DateTime.UtcNow;
                 services.Log.Information("Auto phase ChooseCandidate: row {Row}, materia {Materia}", rows[0] - 429, autoMateriaName);
                 autoPhase = AutoPhase.WaitDetail;
                 autoNextAction = DateTime.UtcNow.AddMilliseconds(200);
@@ -412,7 +421,29 @@ internal sealed class MeldController : IDisposable
             case AutoPhase.WaitDetail:
             {
                 var detail = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttachDialog");
-                if (detail == null || !detail->IsReady) return;
+                if (detail == null || !detail->IsReady)
+                {
+                    if (autoDetailOpenAttempts < 3
+                        && DateTime.UtcNow - autoDetailLastAttemptAt >= TimeSpan.FromSeconds(2))
+                    {
+                        var main = services.GameGui.GetAddonByName<AtkUnitBase>("MateriaAttach");
+                        if (main != null && main->IsReady)
+                        {
+                            var valueIndex = 429 + autoDetailRow;
+                            if (string.Equals(AtkString(main, valueIndex), autoMateriaName, StringComparison.Ordinal))
+                            {
+                                FireInts(main, 2, autoDetailRow, 1, 0);
+                                autoDetailOpenAttempts++;
+                                autoDetailLastAttemptAt = DateTime.UtcNow;
+                                services.Log.Information(
+                                    "Auto WaitDetail retry {Attempt}/3: row {Row}, materia {Materia}",
+                                    autoDetailOpenAttempts, autoDetailRow, autoMateriaName);
+                                Status = $"Detail window delayed; retrying {autoMateriaName} ({autoDetailOpenAttempts}/3)...";
+                            }
+                        }
+                    }
+                    return;
+                }
                 var foundMateria = AtkString(detail, 9);
                 var gain = AtkString(detail, 10);
                 var foundItem = AtkString(detail, 16);
