@@ -43,6 +43,8 @@ internal sealed class MainWindow : Window, IDisposable
     private readonly HashSet<string> selected = [];
     private List<MateriaStock> materiaStock = [];
     private DateTime nextMateriaStockRefresh;
+    private DateTime nextGearRefresh;
+    private string inventoryRefreshStatus = "";
     private string filter = "";
     private bool armFullRun;
     private CraftingMeldPreset? copiedCraftingPreset;
@@ -108,6 +110,7 @@ internal sealed class MainWindow : Window, IDisposable
 
     public override void Draw()
     {
+        RefreshGearIfDue();
         RefreshMateriaStockIfDue();
         if (!ImGui.BeginTabBar("main-tabs")) return;
         if (ImGui.BeginTabItem("Queue"))
@@ -153,6 +156,8 @@ internal sealed class MainWindow : Window, IDisposable
         }
         ImGui.SameLine(); ImGui.SetNextItemWidth(260); ImGui.InputTextWithHint("##filter", "Filter gear...", ref filter, 100);
         ImGui.SameLine(); ImGui.TextDisabled($"{selected.Count} selected");
+        if (inventoryRefreshStatus.Length > 0)
+            ImGui.TextDisabled(inventoryRefreshStatus);
 
         if (ImGui.BeginTable("gear", 5, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.ScrollY, new Vector2(0, 260)))
         {
@@ -1082,18 +1087,117 @@ internal sealed class MainWindow : Window, IDisposable
 
     private void Refresh()
     {
-        gear = scanner.Scan();
-        var available = gear.Select(Key).ToHashSet();
-        selected.Clear();
-        foreach (var q in config.Queue)
-        {
-            var key = $"{q.Container}:{q.Slot}:{q.ItemId}:{q.Hq}";
-            if (available.Contains(key)) selected.Add(key);
-        }
-
-        if (selected.Count != config.Queue.Count) SaveQueue();
+        RefreshGear(manual: true);
         materiaStock = scanner.ScanMateriaStock();
         nextMateriaStockRefresh = DateTime.UtcNow.AddMilliseconds(250);
+    }
+
+    private void RefreshGearIfDue()
+    {
+        if (DateTime.UtcNow < nextGearRefresh || !services.ClientState.IsLoggedIn) return;
+        RefreshGear(manual: false);
+    }
+
+    private void RefreshGear(bool manual)
+    {
+        nextGearRefresh = DateTime.UtcNow.AddMilliseconds(750);
+        var scanned = scanner.Scan();
+        if (!manual && SameInventorySnapshot(gear, scanned)) return;
+
+        var sources = gear.Count > 0
+            ? gear.Where(x => selected.Contains(Key(x)))
+                .Select(x => new QueueLocation(x.ItemId, x.Name, (int)x.Container, x.Slot, x.Hq, x.MeldCount))
+                .ToList()
+            : config.Queue.Select(x => new QueueLocation(x.ItemId, x.Name, x.Container, x.Slot, x.Hq, x.MeldCount)).ToList();
+
+        var preparedMoved = controller.Items.Any(x => PreparedItemMoved(x, scanned));
+        if (preparedMoved)
+        {
+            controller.InvalidateForInventoryChange();
+            armFullRun = false;
+        }
+
+        gear = scanned;
+        var remap = RemapSelection(sources, gear);
+        selected.Clear();
+        foreach (var item in remap.Items) selected.Add(Key(item));
+        SaveQueue();
+
+        if (preparedMoved)
+            inventoryRefreshStatus = "Inventory movement detected: selections were remapped; prepare the queue again.";
+        else if (remap.Ambiguous > 0)
+            inventoryRefreshStatus = $"Inventory refreshed; {remap.Ambiguous} indistinguishable moved selection(s) need to be checked again.";
+        else if (manual)
+            inventoryRefreshStatus = "Inventory locations refreshed.";
+        else if (remap.Moved > 0)
+            inventoryRefreshStatus = $"Inventory sort detected: remapped {remap.Moved} selected item(s).";
+    }
+
+    private static SelectionRemap RemapSelection(IReadOnlyList<QueueLocation> sources, IReadOnlyList<InventoryGear> scanned)
+    {
+        var result = new List<InventoryGear>();
+        var moved = 0;
+        var ambiguous = 0;
+
+        foreach (var group in sources.GroupBy(x => (x.ItemId, x.Hq)))
+        {
+            var pending = group.ToList();
+            var candidates = scanned.Where(x => x.ItemId == group.Key.ItemId && x.Hq == group.Key.Hq).ToList();
+            var used = new HashSet<InventoryGear>();
+
+            foreach (var source in pending.ToList())
+            {
+                // Exact location wins because meld progress legitimately changes the
+                // fingerprint while a queue is running. The fingerprint is the safe
+                // fallback only after that exact location disappears during a sort.
+                InventoryGear? match = candidates.FirstOrDefault(x => !used.Contains(x)
+                    && (int)x.Container == source.Container && x.Slot == source.Slot);
+                if (match is null && source.MeldCount >= 0)
+                {
+                    var fingerprint = candidates.Where(x => !used.Contains(x) && x.MeldCount == source.MeldCount).ToList();
+                    if (fingerprint.Count == 1) match = fingerprint[0];
+                }
+                if (match is null) continue;
+
+                used.Add(match);
+                result.Add(match);
+                if ((int)match.Container != source.Container || match.Slot != source.Slot) moved++;
+                pending.Remove(source);
+            }
+
+            var remaining = candidates.Where(x => !used.Contains(x)).ToList();
+            if (pending.Count == remaining.Count)
+            {
+                result.AddRange(remaining);
+                moved += pending.Zip(remaining).Count(x => x.First.Container != (int)x.Second.Container || x.First.Slot != x.Second.Slot);
+            }
+            else
+            {
+                ambiguous += pending.Count;
+            }
+        }
+
+        return new SelectionRemap(result, moved, ambiguous);
+    }
+
+    private static bool PreparedItemMoved(InventoryGear prepared, IReadOnlyList<InventoryGear> scanned)
+    {
+        var exact = scanned.FirstOrDefault(x => x.ItemId == prepared.ItemId && x.Hq == prepared.Hq
+            && x.Container == prepared.Container && x.Slot == prepared.Slot);
+        // Meld count changes are expected. Only disappearance/replacement of the exact
+        // prepared slot invalidates it; that is the same identity boundary used by the
+        // automation driver.
+        return exact is null;
+    }
+
+    private static bool SameInventorySnapshot(IReadOnlyList<InventoryGear> left, IReadOnlyList<InventoryGear> right)
+    {
+        if (left.Count != right.Count) return false;
+        for (var i = 0; i < left.Count; i++)
+        {
+            if (Key(left[i]) != Key(right[i]) || left[i].MeldCount != right[i].MeldCount) return false;
+        }
+        return true;
     }
     internal void SelectInventoryItem(GameInventoryItem target)
     {
@@ -1322,9 +1426,13 @@ internal sealed class MainWindow : Window, IDisposable
     }
     private void SaveQueue()
     {
-        config.Queue = gear.Where(x => selected.Contains(Key(x))).Select(x => new QueuedItem(x.ItemId, x.Name, (int)x.Container, x.Slot, x.Hq)).ToList();
+        config.Queue = gear.Where(x => selected.Contains(Key(x)))
+            .Select(x => new QueuedItem(x.ItemId, x.Name, (int)x.Container, x.Slot, x.Hq) { MeldCount = x.MeldCount })
+            .ToList();
         services.PluginInterface.SavePluginConfig(config);
     }
+    private sealed record QueueLocation(uint ItemId, string Name, int Container, uint Slot, bool Hq, int MeldCount);
+    private sealed record SelectionRemap(IReadOnlyList<InventoryGear> Items, int Moved, int Ambiguous);
     private static string Key(InventoryGear x) => $"{(int)x.Container}:{x.Slot}:{x.ItemId}:{x.Hq}";
     private bool MatchesFilter(InventoryGear item) => filter.Length == 0
         || item.Name.Contains(filter, StringComparison.OrdinalIgnoreCase);

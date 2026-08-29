@@ -156,6 +156,16 @@ internal sealed class MeldController : IDisposable
 
     public void Stop() { autoPhase = AutoPhase.None; advancedPhase = AdvancedPhase.None; autoFinishedAt = DateTime.UtcNow; State = RunState.Idle; Status = "Stopped by user."; }
 
+    public void InvalidateForInventoryChange()
+    {
+        autoPhase = AutoPhase.None;
+        advancedPhase = AdvancedPhase.None;
+        autoFinishedAt = DateTime.UtcNow;
+        items.Clear();
+        State = RunState.Idle;
+        Status = "Inventory locations changed. Queue stopped and remapped; press Prepare queue again.";
+    }
+
     public unsafe void ValidateOpenDetail()
     {
         if (items.Count == 0) { Fail("Prepare the queue first."); return; }

@@ -20,7 +20,12 @@ public sealed class Configuration : IPluginConfiguration
     public int MaxSingleRepriceDecreasePercent { get; set; } = 10;
 }
 
-public sealed record QueuedItem(uint ItemId, string Name, int Container, uint Slot, bool Hq);
+public sealed record QueuedItem(uint ItemId, string Name, int Container, uint Slot, bool Hq)
+{
+    // A hint used only when an inventory sort moves otherwise-identical items.
+    // Location remains the authoritative identity once a queue is prepared.
+    public int MeldCount { get; init; } = -1;
+}
 
 public sealed class PentameldPricingWatchItem
 {
