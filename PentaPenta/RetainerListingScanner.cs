@@ -92,7 +92,8 @@ internal sealed class RetainerListingScanner(Services services)
         maxDecreasePercent = Math.Clamp(maxDecreasePercent, 0, 100);
         var minimumAllowed = currentPrice * (ulong)(100 - maxDecreasePercent) / 100;
         if (proposedPrice < minimumAllowed)
-            return new(false, $"Rejected: {proposedPrice:N0} gil exceeds the {maxDecreasePercent}% maximum decrease.");
+            return new(false, $"Rejected: {proposedPrice:N0} gil exceeds the {maxDecreasePercent}% maximum decrease.",
+                PriceChangeFailure.MaximumDecreaseExceeded);
 
         manager->SetRetainerMarketPrice((short)captured.MarketSlot, proposedPrice);
         return new(true, $"Submitted {captured.Name}: {currentPrice:N0} → {proposedPrice:N0} gil.");
@@ -125,4 +126,13 @@ internal sealed record RetainerListingCapture(
     int LoadedListings,
     string Status);
 
-internal sealed record PriceChangeSubmission(bool Submitted, string Status);
+internal enum PriceChangeFailure
+{
+    None,
+    MaximumDecreaseExceeded,
+}
+
+internal sealed record PriceChangeSubmission(
+    bool Submitted,
+    string Status,
+    PriceChangeFailure Failure = PriceChangeFailure.None);

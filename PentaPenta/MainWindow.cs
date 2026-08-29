@@ -71,6 +71,7 @@ internal sealed class MainWindow : Window, IDisposable
     private int retainerSweepIndex;
     private int retainerSweepChanged;
     private int retainerSweepSkipped;
+    private int retainerSweepGuardSkipped;
     private DateTime retainerSweepNextAt;
     private string retainerSweepStatus = "";
     private bool listingAuditActive;
@@ -906,7 +907,7 @@ internal sealed class MainWindow : Window, IDisposable
             armRetainerSweep = false;
         }
         if (!canStartSweep) ImGui.EndDisabled();
-        ImGui.TextDisabled("Changes only captured 5/5 watched listings with a valid different proposal; stops on first failure.");
+        ImGui.TextDisabled("Maximum-decrease rejections are skipped; identity, UI, and verification failures stop the sweep.");
         if (retainerSweepStatus.Length > 0) ImGui.TextWrapped(retainerSweepStatus);
     }
 
@@ -914,6 +915,7 @@ internal sealed class MainWindow : Window, IDisposable
     {
         retainerSweepPlans = [];
         retainerSweepSkipped = 0;
+        retainerSweepGuardSkipped = 0;
         foreach (var listing in capture.Listings)
         {
             var proposed = FindProposal(listing);
@@ -942,7 +944,10 @@ internal sealed class MainWindow : Window, IDisposable
         if (retainerSweepIndex >= retainerSweepPlans.Count)
         {
             retainerSweepActive = false;
-            retainerSweepStatus = $"SWEEP COMPLETE: {retainerSweepChanged} changed, {retainerSweepSkipped} skipped. Reopen Items for Sale to refresh its visible prices.";
+            var guardText = retainerSweepGuardSkipped > 0
+                ? $" ({retainerSweepGuardSkipped} exceeded maximum decrease)"
+                : "";
+            retainerSweepStatus = $"SWEEP COMPLETE: {retainerSweepChanged} changed, {retainerSweepSkipped} skipped{guardText}. Reopen Items for Sale to refresh its visible prices.";
             retainerCapture = retainerListings.Capture(config.PentameldPricingWatchList);
             return;
         }
@@ -958,6 +963,14 @@ internal sealed class MainWindow : Window, IDisposable
         var submission = retainerListings.SubmitOne(liveListing, plan.ProposedPrice, config.MaxSingleRepriceDecreasePercent);
         if (!submission.Submitted)
         {
+            if (submission.Failure == PriceChangeFailure.MaximumDecreaseExceeded)
+            {
+                retainerSweepSkipped++;
+                retainerSweepGuardSkipped++;
+                retainerSweepStatus = $"Skipped {plan.Listing.Name}: proposed price exceeds the maximum decrease. Continuing...";
+                retainerSweepNextAt = DateTime.UtcNow.AddMilliseconds(250);
+                return;
+            }
             StopRetainerSweep($"Stopped on {plan.Listing.Name}: {submission.Status}");
             return;
         }
