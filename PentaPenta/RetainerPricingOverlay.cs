@@ -11,12 +11,14 @@ internal sealed class RetainerPricingOverlay : Window
     private readonly Configuration config;
     private readonly RetainerListingScanner listings;
     private readonly MarketBoardOverlay marketBoard;
+    private readonly RetainerPriceScanCalibration calibration;
 
     internal RetainerPricingOverlay(
         Services services,
         Configuration config,
         RetainerListingScanner listings,
-        MarketBoardOverlay marketBoard)
+        MarketBoardOverlay marketBoard,
+        RetainerPriceScanCalibration calibration)
         : base("PentaPenta Retainer Pricing###PentaPentaRetainerPricingOverlay",
             ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings)
@@ -25,13 +27,16 @@ internal sealed class RetainerPricingOverlay : Window
         this.config = config;
         this.listings = listings;
         this.marketBoard = marketBoard;
+        this.calibration = calibration;
         IsOpen = true;
         RespectCloseHotkey = false;
         DisableWindowSounds = true;
     }
 
     public override bool DrawConditions()
-        => !services.GameGui.GetAddonByName("RetainerSellList").IsNull || marketBoard.IsBatchAuditRunning;
+        => !services.GameGui.GetAddonByName("RetainerSellList").IsNull
+            || marketBoard.IsBatchAuditRunning
+            || calibration.IsArmed;
 
     public override unsafe void PreDraw()
     {
@@ -75,5 +80,17 @@ internal sealed class RetainerPricingOverlay : Window
         }
         ImGui.TextWrapped(marketBoard.BatchAuditStatus);
         ImGui.TextDisabled("Independent of the materia-shopping overlay. Stops on the first mismatch; stay near a marketboard.");
+
+        ImGui.Separator();
+        if (!calibration.IsArmed)
+        {
+            if (ImGui.Button("Calibrate retainer rows")) calibration.Arm();
+        }
+        else
+        {
+            if (ImGui.Button("Stop calibration")) calibration.Cancel();
+        }
+        ImGui.TextWrapped(calibration.Status);
+        ImGui.TextDisabled("Observation only: manually use rows 1 and 3 when prompted. No row event is replayed.");
     }
 }
