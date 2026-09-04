@@ -2,6 +2,7 @@ using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace PentaPenta;
 
@@ -44,14 +45,25 @@ internal sealed class RetainerPriceScanCalibration : IDisposable
     private void OnSellListEvent(AddonEvent _, AddonArgs args) => Record("RetainerSellList", args);
     private void OnSellEvent(AddonEvent _, AddonArgs args) => Record("RetainerSell", args);
 
-    private void Record(string addon, AddonArgs args)
+    private unsafe void Record(string addon, AddonArgs args)
     {
         if (!IsArmed || waitingForWindowsToClose || args is not AddonReceiveEventArgs receive) return;
         var eventName = receive.AtkEventType.ToString();
         if (eventName.Contains("RollOver", StringComparison.Ordinal)
             || eventName.Contains("RollOut", StringComparison.Ordinal)
             || eventName is "MouseOver" or "MouseOut") return;
-        var entry = $"{addon}: type={receive.AtkEventType}, param={receive.EventParam}";
+        var detail = string.Empty;
+        if (eventName.Contains("ListItem", StringComparison.Ordinal))
+        {
+            var nativeEvent = (AtkEvent*)receive.AtkEvent;
+            var nativeData = (AtkEventData*)receive.AtkEventData;
+            var renderer = nativeData == null ? null : nativeData->ListItemData.ListItemRenderer;
+            var selectedIndex = nativeData == null ? -1 : nativeData->ListItemData.SelectedIndex;
+            var rendererIndex = renderer == null ? -1 : renderer->ListItemIndex;
+            var sourceNodeId = nativeEvent == null || nativeEvent->Node == null ? 0 : nativeEvent->Node->NodeId;
+            detail = $", selected={selectedIndex}, renderer={rendererIndex}, node={sourceNodeId}";
+        }
+        var entry = $"{addon}: type={receive.AtkEventType}, param={receive.EventParam}{detail}";
         if (events.Count == 0 || events[^1] != entry) events.Add(entry);
         Status = $"CALIBRATION {sampleNumber}/2: captured {events.Count} relevant event(s); continue until Search Results opens.";
         services.Log.Information("[RetainerPriceCalibration] {Entry}", entry);
