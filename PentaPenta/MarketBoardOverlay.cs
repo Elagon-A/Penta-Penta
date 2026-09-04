@@ -172,11 +172,6 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
 
     internal bool OpenListingForAudit(uint itemId)
     {
-        if (!config.EnableMarketBoardOverlay)
-        {
-            status = "Enable the marketboard materia overlay before starting a guided price audit.";
-            return false;
-        }
         if (pendingItemId != 0)
         {
             status = $"Finish the current market operation for {pendingItemName} first.";
@@ -193,12 +188,6 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
             BatchAuditStatus = "Finish or stop the current market operation first.";
             return false;
         }
-        if (!config.EnableMarketBoardOverlay)
-        {
-            BatchAuditStatus = "Enable the marketboard materia overlay before starting a native batch scan.";
-            return false;
-        }
-
         if (!services.GameGui.GetAddonByName("ItemSearchResult").IsNull)
         {
             BatchAuditStatus = "Close the existing Search Results window before starting the native batch scan.";
@@ -238,18 +227,27 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
 
     private void OnFrameworkUpdate(IFramework _)
     {
-        if (!config.EnableMarketBoardOverlay)
+        if (!config.EnableMarketBoardOverlay && !IsBatchAuditRunning && pendingItemId == 0)
         {
             IsOpen = false;
             wasNearMarketBoard = false;
-            if (pendingItemId != 0) CancelPending("Marketboard overlay disabled.");
             return;
         }
 
         var isNearby = FindNearbyMarketBoard() is not null;
-        if (isNearby && !wasNearMarketBoard) IsOpen = true;
-        if (!isNearby) IsOpen = false;
-        wasNearMarketBoard = isNearby;
+        if (config.EnableMarketBoardOverlay)
+        {
+            if (isNearby && !wasNearMarketBoard) IsOpen = true;
+            if (!isNearby) IsOpen = false;
+            wasNearMarketBoard = isNearby;
+        }
+        else
+        {
+            // Native pricing scans share the market-search controller but are not
+            // part of the optional materia-shopping window.
+            IsOpen = false;
+            wasNearMarketBoard = false;
+        }
 
         if (pendingItemId == 0)
         {
@@ -261,7 +259,9 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         {
             var timeoutMessage = pendingPhase switch
             {
-                PendingPhase.OpeningBoard => "Marketboard opening timed out. Move closer and click the materia again.",
+                PendingPhase.OpeningBoard => automaticSearch
+                    ? "Native price scan could not open the marketboard. Move closer and retry the scan."
+                    : "Marketboard opening timed out. Move closer and click the materia again.",
                 PendingPhase.FocusingSearch => "Marketboard did not enter text-search mode or enable Search.",
                 PendingPhase.WaitingForSearchResults => "Marketboard item search returned no exact result before timing out.",
                 PendingPhase.WaitingForListings => "The selected materia's listings did not open before timing out.",

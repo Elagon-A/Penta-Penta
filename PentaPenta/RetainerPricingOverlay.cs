@@ -31,7 +31,7 @@ internal sealed class RetainerPricingOverlay : Window
     }
 
     public override bool DrawConditions()
-        => !services.GameGui.GetAddonByName("RetainerSellList").IsNull;
+        => !services.GameGui.GetAddonByName("RetainerSellList").IsNull || marketBoard.IsBatchAuditRunning;
 
     public override unsafe void PreDraw()
     {
@@ -56,20 +56,24 @@ internal sealed class RetainerPricingOverlay : Window
         ImGui.TextUnformatted("PentaPenta pricing");
         var capture = listings.Capture(config.PentameldPricingWatchList);
         var itemIds = capture.Listings.Select(x => x.ItemId).Distinct().ToList();
-        ImGui.TextDisabled(capture.RetainerName.Length == 0
-            ? capture.Status
-            : $"{capture.RetainerName}: {itemIds.Count} watched 5/5 item(s)");
+        if (!marketBoard.IsBatchAuditRunning || capture.RetainerName.Length > 0)
+            ImGui.TextDisabled(capture.RetainerName.Length == 0
+                ? capture.Status
+                : $"{capture.RetainerName}: {itemIds.Count} watched 5/5 item(s)");
 
-        if (marketBoard.IsBatchAuditRunning || itemIds.Count == 0) ImGui.BeginDisabled();
-        if (ImGui.Button($"Scan {itemIds.Count} listings"))
-            marketBoard.StartBatchAudit(capture);
-        if (marketBoard.IsBatchAuditRunning || itemIds.Count == 0) ImGui.EndDisabled();
+        if (!services.GameGui.GetAddonByName("RetainerSellList").IsNull)
+        {
+            if (marketBoard.IsBatchAuditRunning || itemIds.Count == 0) ImGui.BeginDisabled();
+            if (ImGui.Button($"Scan {itemIds.Count} listings"))
+                marketBoard.StartBatchAudit(capture);
+            if (marketBoard.IsBatchAuditRunning || itemIds.Count == 0) ImGui.EndDisabled();
+        }
         if (marketBoard.IsBatchAuditRunning)
         {
-            ImGui.SameLine();
+            if (!services.GameGui.GetAddonByName("RetainerSellList").IsNull) ImGui.SameLine();
             if (ImGui.Button("Stop scan")) marketBoard.StopBatchAudit();
         }
         ImGui.TextWrapped(marketBoard.BatchAuditStatus);
-        ImGui.TextDisabled("Experimental: searches one item at a time and stops on the first mismatch. Stay near a marketboard.");
+        ImGui.TextDisabled("Independent of the materia-shopping overlay. Stops on the first mismatch; stay near a marketboard.");
     }
 }
