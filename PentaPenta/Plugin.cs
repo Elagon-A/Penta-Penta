@@ -47,7 +47,7 @@ public sealed class Plugin : IDalamudPlugin
         retainerNativePriceSweep = new RetainerNativePriceSweep(services, nativeMarketPricing);
         marketBoardDiagnostic = new MarketBoardReceiveDiagnostic(services);
         marketBoardOverlay = new MarketBoardOverlay(services, config, scanner);
-        retainerPricingOverlay = new RetainerPricingOverlay(services, config, retainerListings, marketBoardOverlay, retainerPriceCalibration);
+        retainerPricingOverlay = new RetainerPricingOverlay(services, config, retainerListings, marketBoardOverlay, retainerPriceCalibration, retainerNativePriceSweep);
         autoRetainerPricing = new AutoRetainerPricingBridge(services, config, pricing, retainerListings);
         main = new MainWindow(services, config, scanner, controller, pricing, autoRetainerPricing, retainerListings, nativeMarketPricing, retainerPriceCalibration, retainerNativePriceSweep, marketBoardDiagnostic, marketBoardOverlay, retainerPricingOverlay);
         windows.AddWindow(main);

@@ -12,13 +12,15 @@ internal sealed class RetainerPricingOverlay : Window
     private readonly RetainerListingScanner listings;
     private readonly MarketBoardOverlay marketBoard;
     private readonly RetainerPriceScanCalibration calibration;
+    private readonly RetainerNativePriceSweep nativeSweep;
 
     internal RetainerPricingOverlay(
         Services services,
         Configuration config,
         RetainerListingScanner listings,
         MarketBoardOverlay marketBoard,
-        RetainerPriceScanCalibration calibration)
+        RetainerPriceScanCalibration calibration,
+        RetainerNativePriceSweep nativeSweep)
         : base("PentaPenta Retainer Pricing###PentaPentaRetainerPricingOverlay",
             ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings)
@@ -28,6 +30,7 @@ internal sealed class RetainerPricingOverlay : Window
         this.listings = listings;
         this.marketBoard = marketBoard;
         this.calibration = calibration;
+        this.nativeSweep = nativeSweep;
         IsOpen = true;
         RespectCloseHotkey = false;
         DisableWindowSounds = true;
@@ -66,22 +69,7 @@ internal sealed class RetainerPricingOverlay : Window
                 ? capture.Status
                 : $"{capture.RetainerName}: {itemIds.Count} watched 5/5 item(s)");
 
-        if (!services.GameGui.GetAddonByName("RetainerSellList").IsNull)
-        {
-            if (marketBoard.IsBatchAuditRunning || itemIds.Count == 0) ImGui.BeginDisabled();
-            if (ImGui.Button($"Scan {itemIds.Count} listings"))
-                marketBoard.StartBatchAudit(capture);
-            if (marketBoard.IsBatchAuditRunning || itemIds.Count == 0) ImGui.EndDisabled();
-        }
-        if (marketBoard.IsBatchAuditRunning)
-        {
-            if (!services.GameGui.GetAddonByName("RetainerSellList").IsNull) ImGui.SameLine();
-            if (ImGui.Button("Stop scan")) marketBoard.StopBatchAudit();
-        }
-        ImGui.TextWrapped(marketBoard.BatchAuditStatus);
-        ImGui.TextDisabled("Independent of the materia-shopping overlay. Stops on the first mismatch; stay near a marketboard.");
-
-        ImGui.Separator();
+        ImGui.TextDisabled("Retainer-native workflow; does not open the marketboard or materia-shopping overlay.");
         if (!calibration.IsArmed)
         {
             if (ImGui.Button("Calibrate retainer rows")) calibration.Arm();
@@ -92,5 +80,19 @@ internal sealed class RetainerPricingOverlay : Window
         }
         ImGui.TextWrapped(calibration.Status);
         ImGui.TextDisabled("Observation only: manually use rows 1 and 3 when prompted. No row event is replayed.");
+
+        ImGui.Separator();
+        if (!nativeSweep.IsRowOpenTestArmed)
+        {
+            if (ImGui.Button("Arm one-row open test")) nativeSweep.ArmRowOpenTest();
+        }
+        else
+        {
+            if (ImGui.Button("Open first watched row once")) nativeSweep.RunRowOpenTest(capture);
+            ImGui.SameLine();
+            if (ImGui.Button("Disarm")) nativeSweep.CancelRowOpenTest();
+        }
+        ImGui.TextWrapped(nativeSweep.Status);
+        ImGui.TextDisabled("Test only: opens Adjust Price, verifies the item name, and never presses Compare Prices.");
     }
 }

@@ -16,8 +16,10 @@ internal sealed class RetainerNativePriceSweep : IDisposable
     private DateTime nextAction;
     private DateTime rowReadyDeadline;
     private SweepPhase phase;
+    private CapturedRetainerListing? rowOpenTestListing;
 
     internal bool IsRunning => phase != SweepPhase.Idle;
+    internal bool IsRowOpenTestArmed { get; private set; }
     internal string Status { get; private set; } = "Native retainer scan has not been run.";
     internal event Action<NativeMarketPricingCapture>? Captured;
 
@@ -61,8 +63,89 @@ internal sealed class RetainerNativePriceSweep : IDisposable
 
     internal void Stop(string reason = "Stopped by user.")
     {
+        if (phase == SweepPhase.VerifyRowOpenTest)
+        {
+            phase = SweepPhase.Idle;
+            rowOpenTestListing = null;
+            Status = $"Row-open test stopped: {reason}";
+            return;
+        }
         phase = SweepPhase.Idle;
         Status = $"Native scan stopped at {index}/{listings.Count}: {reason}";
+    }
+
+    internal void ArmRowOpenTest()
+    {
+        if (IsRunning)
+        {
+            Status = "Stop the current native operation before arming a row-open test.";
+            return;
+        }
+        IsRowOpenTestArmed = true;
+        Status = "ARMED: the next test will open one verified watched row and stop at Adjust Price.";
+    }
+
+    internal void CancelRowOpenTest()
+    {
+        IsRowOpenTestArmed = false;
+        Status = "Row-open test disarmed.";
+    }
+
+    internal unsafe void RunRowOpenTest(RetainerListingCapture capture)
+    {
+        if (!IsRowOpenTestArmed)
+        {
+            Status = "Arm the one-row test first.";
+            return;
+        }
+        IsRowOpenTestArmed = false;
+        if (services.GameGui.GetAddonByName("RetainerSellList").IsNull)
+        {
+            Status = "Open the retainer Items for Sale window before running the test.";
+            return;
+        }
+        if (!services.GameGui.GetAddonByName("RetainerSell").IsNull)
+        {
+            Status = "Close the existing Adjust Price window before running the test.";
+            return;
+        }
+        var listing = capture.Listings.OrderBy(x => x.RowIndex).FirstOrDefault();
+        if (listing is null)
+        {
+            Status = "The active retainer has no watched 5/5 listing to test.";
+            return;
+        }
+
+        var addon = services.GameGui.GetAddonByName<AtkUnitBase>("RetainerSellList");
+        if (addon == null || !addon->IsReady)
+        {
+            Status = "The retainer sale list was not ready.";
+            return;
+        }
+        var renderer = FindRendererByIndex(&addon->UldManager, listing.RowIndex, 0, []);
+        if (renderer == null)
+        {
+            Status = $"Could not find the live renderer for displayed row {listing.RowIndex + 1}; nothing was invoked.";
+            return;
+        }
+        var list = FindOwningList(renderer);
+        if (list == null || listing.RowIndex < 0 || listing.RowIndex >= list->GetItemCount())
+        {
+            Status = $"Could not verify the owning list for displayed row {listing.RowIndex + 1}; nothing was invoked.";
+            return;
+        }
+
+        rowOpenTestListing = listing;
+        listings = [listing];
+        index = 0;
+        phase = SweepPhase.VerifyRowOpenTest;
+        rowReadyDeadline = DateTime.UtcNow.AddSeconds(8);
+        nextAction = DateTime.UtcNow.AddMilliseconds(300);
+        Status = $"Opening row {listing.RowIndex + 1} for {listing.Name}; no Compare Prices action will be sent.";
+        // SelectItem(..., true) is the single native path observed during
+        // calibration. The old implementation incorrectly followed this with a
+        // second DispatchItemEvent call, which could double-open or desync rows.
+        list->SelectItem(listing.RowIndex, true);
     }
 
     private unsafe void OnFrameworkUpdate(IFramework _)
@@ -78,6 +161,32 @@ internal sealed class RetainerNativePriceSweep : IDisposable
         var listing = listings[index];
         switch (phase)
         {
+            case SweepPhase.VerifyRowOpenTest:
+            {
+                var expected = rowOpenTestListing;
+                var addon = services.GameGui.GetAddonByName<AddonRetainerSell>("RetainerSell");
+                if (addon == null || !addon->IsReady)
+                {
+                    if (DateTime.UtcNow < rowReadyDeadline)
+                    {
+                        nextAction = DateTime.UtcNow.AddMilliseconds(250);
+                        return;
+                    }
+                    Stop("Adjust Price did not open within 8 seconds.");
+                    return;
+                }
+                var openedName = addon->ItemName == null ? string.Empty : addon->ItemName->NodeText.ToString();
+                phase = SweepPhase.Idle;
+                rowOpenTestListing = null;
+                if (expected is not null && NamesMatch(openedName, expected.Name))
+                    Status = $"ROW TEST PASSED: row {expected.RowIndex + 1} opened {expected.Name}. Adjust Price was left open; Compare Prices was not invoked.";
+                else
+                {
+                    ((AtkUnitBase*)addon)->Close(true);
+                    Status = $"ROW TEST FAILED: opened '{openedName}', expected '{expected?.Name}'. Adjust Price was closed and no market request was sent.";
+                }
+                return;
+            }
             case SweepPhase.SelectRow:
             {
                 var addon = services.GameGui.GetAddonByName<AtkUnitBase>("RetainerSellList");
@@ -175,6 +284,44 @@ internal sealed class RetainerNativePriceSweep : IDisposable
         return best;
     }
 
+    private static unsafe AtkComponentListItemRenderer* FindRendererByIndex(
+        AtkUldManager* manager,
+        int wantedIndex,
+        int depth,
+        HashSet<nint> visited)
+    {
+        if (manager == null || manager->NodeList == null || depth > 8 || !visited.Add((nint)manager)) return null;
+        for (var i = 0; i < manager->NodeListCount; i++)
+        {
+            var node = manager->NodeList[i];
+            if (node == null || node->Type != NodeType.Component) continue;
+            var component = node->GetAsAtkComponentNode()->Component;
+            if (component == null) continue;
+            if (component->GetComponentType() == ComponentType.ListItemRenderer)
+            {
+                var renderer = (AtkComponentListItemRenderer*)component;
+                if (renderer->ListItemIndex == wantedIndex) return renderer;
+            }
+            var nested = FindRendererByIndex(&component->UldManager, wantedIndex, depth + 1, visited);
+            if (nested != null) return nested;
+        }
+        return null;
+    }
+
+    private static unsafe AtkComponentList* FindOwningList(AtkComponentListItemRenderer* renderer)
+    {
+        for (var node = renderer == null ? null : (AtkResNode*)renderer->OwnerNode;
+             node != null;
+             node = node->ParentNode)
+        {
+            if (node->Type != NodeType.Component) continue;
+            var component = node->GetAsAtkComponentNode()->Component;
+            if (component != null && component->GetComponentType() == ComponentType.List)
+                return (AtkComponentList*)component;
+        }
+        return null;
+    }
+
     private static unsafe void FindListsRecursive(
         AtkUldManager* manager,
         int depth,
@@ -251,5 +398,5 @@ internal sealed class RetainerNativePriceSweep : IDisposable
         if (IsRunning) Stop("Plugin unloaded.");
     }
 
-    private enum SweepPhase { Idle, SelectRow, OpenCompare, WaitResults }
+    private enum SweepPhase { Idle, VerifyRowOpenTest, SelectRow, OpenCompare, WaitResults }
 }
