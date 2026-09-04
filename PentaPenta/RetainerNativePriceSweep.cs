@@ -122,16 +122,9 @@ internal sealed class RetainerNativePriceSweep : IDisposable
             Status = "The retainer sale list was not ready.";
             return;
         }
-        var renderer = FindRendererByIndex(&addon->UldManager, listing.RowIndex, 0, []);
-        if (renderer == null)
+        if (listing.RowIndex < 0 || listing.RowIndex >= capture.LoadedListings)
         {
-            Status = $"Could not find the live renderer for displayed row {listing.RowIndex + 1}; nothing was invoked.";
-            return;
-        }
-        var list = FindOwningList(renderer);
-        if (list == null || listing.RowIndex < 0 || listing.RowIndex >= list->GetItemCount())
-        {
-            Status = $"Could not verify the owning list for displayed row {listing.RowIndex + 1}; nothing was invoked.";
+            Status = $"Displayed row {listing.RowIndex + 1} is outside the captured sale-list range; nothing was invoked.";
             return;
         }
 
@@ -142,10 +135,10 @@ internal sealed class RetainerNativePriceSweep : IDisposable
         rowReadyDeadline = DateTime.UtcNow.AddSeconds(8);
         nextAction = DateTime.UtcNow.AddMilliseconds(300);
         Status = $"Opening row {listing.RowIndex + 1} for {listing.Name}; no Compare Prices action will be sent.";
-        // SelectItem(..., true) is the single native path observed during
-        // calibration. The old implementation incorrectly followed this with a
-        // second DispatchItemEvent call, which could double-open or desync rows.
-        list->SelectItem(listing.RowIndex, true);
+        // RetainerSellList accepts (command 0, zero-based sale-slot index, 1)
+        // to open that listing. This avoids guessing at virtualized renderers and
+        // sends exactly one addon callback; Compare Prices is deliberately not sent.
+        FireIntCallback(addon, 0, listing.RowIndex, 1);
     }
 
     private unsafe void OnFrameworkUpdate(IFramework _)
@@ -284,42 +277,15 @@ internal sealed class RetainerNativePriceSweep : IDisposable
         return best;
     }
 
-    private static unsafe AtkComponentListItemRenderer* FindRendererByIndex(
-        AtkUldManager* manager,
-        int wantedIndex,
-        int depth,
-        HashSet<nint> visited)
+    private static unsafe void FireIntCallback(AtkUnitBase* addon, params int[] values)
     {
-        if (manager == null || manager->NodeList == null || depth > 8 || !visited.Add((nint)manager)) return null;
-        for (var i = 0; i < manager->NodeListCount; i++)
+        var args = stackalloc AtkValue[values.Length];
+        for (var i = 0; i < values.Length; i++)
         {
-            var node = manager->NodeList[i];
-            if (node == null || node->Type != NodeType.Component) continue;
-            var component = node->GetAsAtkComponentNode()->Component;
-            if (component == null) continue;
-            if (component->GetComponentType() == ComponentType.ListItemRenderer)
-            {
-                var renderer = (AtkComponentListItemRenderer*)component;
-                if (renderer->ListItemIndex == wantedIndex) return renderer;
-            }
-            var nested = FindRendererByIndex(&component->UldManager, wantedIndex, depth + 1, visited);
-            if (nested != null) return nested;
+            args[i].Type = AtkValueType.Int;
+            args[i].Int = values[i];
         }
-        return null;
-    }
-
-    private static unsafe AtkComponentList* FindOwningList(AtkComponentListItemRenderer* renderer)
-    {
-        for (var node = renderer == null ? null : (AtkResNode*)renderer->OwnerNode;
-             node != null;
-             node = node->ParentNode)
-        {
-            if (node->Type != NodeType.Component) continue;
-            var component = node->GetAsAtkComponentNode()->Component;
-            if (component != null && component->GetComponentType() == ComponentType.List)
-                return (AtkComponentList*)component;
-        }
-        return null;
+        addon->FireCallback((uint)values.Length, args, true);
     }
 
     private static unsafe void FindListsRecursive(
