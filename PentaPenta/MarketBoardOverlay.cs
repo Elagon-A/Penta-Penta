@@ -42,13 +42,22 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     private uint pendingItemId;
     private string pendingItemName = "";
     private DateTime pendingDeadline;
+    private DateTime nextPendingAction;
     private PendingPhase pendingPhase;
+    private readonly List<uint> batchAuditItems = [];
+    private int batchAuditIndex;
+    private bool automaticSearch;
     private DateTime nextStockRefresh;
     private string lastDiagnosticSnapshot = "";
     private int diagnosticInitialVisibleResults;
     private Dictionary<uint, int> stock = [];
     private string status = "Click a materia to open its market listings.";
     private bool wasNearMarketBoard;
+
+    internal bool IsBatchAuditRunning => batchAuditItems.Count > 0;
+    internal string BatchAuditStatus { get; private set; } = "No native retainer batch scan has been run.";
+    internal Func<uint, bool>? CaptureAuditListing { private get; set; }
+    internal Action<RetainerListingCapture>? CaptureRetainerForAudit { private get; set; }
 
     public MarketBoardOverlay(Services services, Configuration config, InventoryScanner scanner)
         : base("PentaPenta Materia Shopping###PentaPentaMarket")
@@ -78,6 +87,12 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         DrawMateriaSection("Gathering", GatheringMateria);
         ImGui.Separator();
         ImGui.TextDisabled(status);
+        if (IsBatchAuditRunning)
+        {
+            ImGui.Separator();
+            ImGui.TextWrapped(BatchAuditStatus);
+            if (ImGui.Button("Stop native price scan")) StopBatchAudit();
+        }
     }
 
     private void DrawMateriaSection(string title, IReadOnlyList<MarketMateriaRow> rows)
@@ -115,8 +130,9 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         ImGui.PopStyleColor();
     }
 
-    private unsafe void QueueListing(uint itemId)
+    private unsafe void QueueListing(uint itemId, bool automatic = false)
     {
+        automaticSearch = automatic;
         pendingItemId = itemId;
         pendingItemName = ResolveItemName(itemId);
         if (pendingItemName.Length == 0)
@@ -170,6 +186,56 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         return pendingItemId == itemId;
     }
 
+    internal bool StartBatchAudit(RetainerListingCapture retainerCapture)
+    {
+        if (pendingItemId != 0 || IsBatchAuditRunning)
+        {
+            BatchAuditStatus = "Finish or stop the current market operation first.";
+            return false;
+        }
+        if (!config.EnableMarketBoardOverlay)
+        {
+            BatchAuditStatus = "Enable the marketboard materia overlay before starting a native batch scan.";
+            return false;
+        }
+
+        if (!services.GameGui.GetAddonByName("ItemSearchResult").IsNull)
+        {
+            BatchAuditStatus = "Close the existing Search Results window before starting the native batch scan.";
+            return false;
+        }
+
+        var unique = retainerCapture.Listings.Select(x => x.ItemId).Where(x => x != 0).Distinct().ToList();
+        if (unique.Count == 0)
+        {
+            BatchAuditStatus = "The open retainer has no watched 5/5 listings to scan.";
+            return false;
+        }
+        if (!IsMarketSearchReady() && FindNearbyMarketBoard() is null)
+        {
+            BatchAuditStatus = "Move within 7 yalms of a marketboard before starting the native batch scan.";
+            return false;
+        }
+
+        CaptureRetainerForAudit?.Invoke(retainerCapture);
+        batchAuditItems.AddRange(unique);
+        batchAuditIndex = 0;
+        BatchAuditStatus = $"Starting native scan: 0/{batchAuditItems.Count}. Do not interact with the market windows.";
+        StartNextBatchItem();
+        return IsBatchAuditRunning;
+    }
+
+    internal void StopBatchAudit(string reason = "Stopped by user.")
+    {
+        var total = batchAuditItems.Count;
+        batchAuditItems.Clear();
+        pendingItemId = 0;
+        pendingItemName = "";
+        pendingPhase = PendingPhase.None;
+        automaticSearch = false;
+        BatchAuditStatus = $"Native scan stopped at {batchAuditIndex}/{total}: {reason}";
+    }
+
     private void OnFrameworkUpdate(IFramework _)
     {
         if (!config.EnableMarketBoardOverlay)
@@ -185,7 +251,12 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         if (!isNearby) IsOpen = false;
         wasNearMarketBoard = isNearby;
 
-        if (pendingItemId == 0) return;
+        if (pendingItemId == 0)
+        {
+            if (IsBatchAuditRunning && DateTime.UtcNow >= nextPendingAction)
+                StartNextBatchItem();
+            return;
+        }
         if (DateTime.UtcNow > pendingDeadline)
         {
             var timeoutMessage = pendingPhase switch
@@ -194,6 +265,7 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
                 PendingPhase.FocusingSearch => "Marketboard did not enter text-search mode or enable Search.",
                 PendingPhase.WaitingForSearchResults => "Marketboard item search returned no exact result before timing out.",
                 PendingPhase.WaitingForListings => "The selected materia's listings did not open before timing out.",
+                PendingPhase.WaitingForCapture => "Native market results did not become readable before timing out.",
                 PendingPhase.DiagnosticManualSearch => "Automatic market search produced no fresh visible results.",
                 _ => "Marketboard operation timed out.",
             };
@@ -210,6 +282,12 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
             ObserveManualSearchDiagnostic();
             return;
         }
+        if (pendingPhase == PendingPhase.FocusingSearch)
+        {
+            if (DateTime.UtcNow < nextPendingAction) return;
+            SubmitNativeSearch();
+            return;
+        }
         if (pendingPhase == PendingPhase.WaitingForSearchResults)
         {
             SelectExactSearchResult();
@@ -218,11 +296,21 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         if (pendingPhase == PendingPhase.WaitingForListings
             && !services.GameGui.GetAddonByName("ItemSearchResult").IsNull)
         {
+            if (automaticSearch)
+            {
+                pendingPhase = PendingPhase.WaitingForCapture;
+                nextPendingAction = DateTime.UtcNow.AddMilliseconds(1200);
+                pendingDeadline = DateTime.UtcNow.AddSeconds(10);
+                status = $"Verifying listings for {pendingItemName}...";
+                return;
+            }
             status = $"Opened listings for {pendingItemName}.";
             pendingItemId = 0;
             pendingItemName = "";
             pendingPhase = PendingPhase.None;
         }
+        if (pendingPhase == PendingPhase.WaitingForCapture && DateTime.UtcNow >= nextPendingAction)
+            FinishBatchItemCapture();
     }
 
     private unsafe void RunNativeSearch()
@@ -282,6 +370,15 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         textChanged((AtkUnitBase*)addon, InputCallbackType.TextChanged,
             textInputBase->RawString.StringPtr, textInputBase->EvaluatedString.StringPtr,
             textInputBase->CallbackEventKind);
+        if (automaticSearch)
+        {
+            pendingPhase = PendingPhase.FocusingSearch;
+            nextPendingAction = DateTime.UtcNow.AddMilliseconds(350);
+            pendingDeadline = DateTime.UtcNow.AddSeconds(12);
+            status = $"Preparing native search for {pendingItemName}...";
+            return;
+        }
+
         // Pause for two real clicks while the supported AddonLifecycle service
         // records the callback type/parameter generated by the current client.
         pendingPhase = PendingPhase.DiagnosticManualSearch;
@@ -357,6 +454,44 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
         services.Log.Information("Started native marketboard search for {Item} ({ItemId})", pendingItemName, pendingItemId);
     }
 
+    private unsafe void FinishBatchItemCapture()
+    {
+        var expectedItemId = pendingItemId;
+        var expectedName = pendingItemName;
+        if (CaptureAuditListing?.Invoke(expectedItemId) != true)
+        {
+            CancelPending($"Could not verify native listings for {expectedName}; the scan was stopped.");
+            return;
+        }
+
+        var results = services.GameGui.GetAddonByName<AtkUnitBase>("ItemSearchResult");
+        if (results != null) results->Close(true);
+        batchAuditIndex++;
+        pendingItemId = 0;
+        pendingItemName = "";
+        pendingPhase = PendingPhase.None;
+        automaticSearch = false;
+        nextPendingAction = DateTime.UtcNow.AddMilliseconds(1500);
+        BatchAuditStatus = $"Captured {expectedName}: {batchAuditIndex}/{batchAuditItems.Count}.";
+    }
+
+    private void StartNextBatchItem()
+    {
+        if (!IsBatchAuditRunning) return;
+        if (batchAuditIndex >= batchAuditItems.Count)
+        {
+            var total = batchAuditItems.Count;
+            batchAuditItems.Clear();
+            automaticSearch = false;
+            BatchAuditStatus = $"NATIVE SCAN COMPLETE: captured {total}/{total} item(s).";
+            return;
+        }
+
+        var itemId = batchAuditItems[batchAuditIndex];
+        BatchAuditStatus = $"Opening item {batchAuditIndex + 1}/{batchAuditItems.Count}...";
+        QueueListing(itemId, true);
+    }
+
     private unsafe void SelectExactSearchResult()
     {
         var addon = services.GameGui.GetAddonByName<AddonItemSearch>("ItemSearch");
@@ -415,10 +550,18 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
 
     private void CancelPending(string message)
     {
+        var wasBatch = IsBatchAuditRunning;
+        var total = batchAuditItems.Count;
         pendingItemId = 0;
         pendingItemName = "";
         pendingPhase = PendingPhase.None;
+        automaticSearch = false;
         status = message;
+        if (wasBatch)
+        {
+            batchAuditItems.Clear();
+            BatchAuditStatus = $"Native scan stopped at {batchAuditIndex}/{total}: {message}";
+        }
     }
 
     public void Dispose()
@@ -428,5 +571,5 @@ internal sealed class MarketBoardOverlay : Window, IDisposable
     }
 
     private sealed record MarketMateriaRow(string Stat, uint Grade12ItemId, uint Grade11ItemId);
-    private enum PendingPhase { None, OpeningBoard, FocusingSearch, DiagnosticManualSearch, WaitingForSearchResults, WaitingForListings }
+    private enum PendingPhase { None, OpeningBoard, FocusingSearch, DiagnosticManualSearch, WaitingForSearchResults, WaitingForListings, WaitingForCapture }
 }

@@ -8,17 +8,23 @@ namespace PentaPenta;
 internal sealed class RetainerPricingOverlay : Window
 {
     private readonly Services services;
+    private readonly Configuration config;
+    private readonly RetainerListingScanner listings;
+    private readonly MarketBoardOverlay marketBoard;
 
     internal RetainerPricingOverlay(
         Services services,
         Configuration config,
         RetainerListingScanner listings,
-        RetainerNativePriceSweep sweep)
+        MarketBoardOverlay marketBoard)
         : base("PentaPenta Retainer Pricing###PentaPentaRetainerPricingOverlay",
             ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings)
     {
         this.services = services;
+        this.config = config;
+        this.listings = listings;
+        this.marketBoard = marketBoard;
         IsOpen = true;
         RespectCloseHotkey = false;
         DisableWindowSounds = true;
@@ -48,6 +54,22 @@ internal sealed class RetainerPricingOverlay : Window
     public override void Draw()
     {
         ImGui.TextUnformatted("PentaPenta pricing");
-        ImGui.TextWrapped("Automatic row sweep disabled for safety. Use Guided open-retainer price audit in PentaPenta.");
+        var capture = listings.Capture(config.PentameldPricingWatchList);
+        var itemIds = capture.Listings.Select(x => x.ItemId).Distinct().ToList();
+        ImGui.TextDisabled(capture.RetainerName.Length == 0
+            ? capture.Status
+            : $"{capture.RetainerName}: {itemIds.Count} watched 5/5 item(s)");
+
+        if (marketBoard.IsBatchAuditRunning || itemIds.Count == 0) ImGui.BeginDisabled();
+        if (ImGui.Button($"Scan {itemIds.Count} listings"))
+            marketBoard.StartBatchAudit(capture);
+        if (marketBoard.IsBatchAuditRunning || itemIds.Count == 0) ImGui.EndDisabled();
+        if (marketBoard.IsBatchAuditRunning)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Stop scan")) marketBoard.StopBatchAudit();
+        }
+        ImGui.TextWrapped(marketBoard.BatchAuditStatus);
+        ImGui.TextDisabled("Experimental: searches one item at a time and stops on the first mismatch. Stay near a marketboard.");
     }
 }

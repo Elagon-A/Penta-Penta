@@ -94,6 +94,8 @@ internal sealed class MainWindow : Window, IDisposable
         : base("PentaPenta###PentaPentaMain")
     {
         this.services = services; this.config = config; this.scanner = scanner; this.controller = controller; this.pricing = pricing; this.autoRetainerPricing = autoRetainerPricing; this.retainerListings = retainerListings; this.nativeMarketPricing = nativeMarketPricing; this.retainerPriceCalibration = retainerPriceCalibration; this.retainerNativePriceSweep = retainerNativePriceSweep; this.marketBoardDiagnostic = marketBoardDiagnostic; this.marketBoardOverlay = marketBoardOverlay; this.retainerPricingOverlay = retainerPricingOverlay;
+        marketBoardOverlay.CaptureAuditListing = CaptureBatchNativeMarketPrice;
+        marketBoardOverlay.CaptureRetainerForAudit = CaptureRetainerForNativeAudit;
         materiaDiagnostics = new MateriaDiagnostics(services);
         retrievalController = new MateriaRetrievalController(services);
         pricingCatalog = services.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>()
@@ -264,7 +266,12 @@ internal sealed class MainWindow : Window, IDisposable
 
     public override void OnClose() => retrievalController.Stop();
 
-    public void Dispose() => retrievalController.Dispose();
+    public void Dispose()
+    {
+        marketBoardOverlay.CaptureAuditListing = null;
+        marketBoardOverlay.CaptureRetainerForAudit = null;
+        retrievalController.Dispose();
+    }
 
     private void DrawMateriaHistory()
     {
@@ -1006,6 +1013,32 @@ internal sealed class MainWindow : Window, IDisposable
         foreach (var result in capture.Results)
             nativePricingResults[(result.ItemId, result.Hq)] = result;
         pricingStatus = capture.Status;
+    }
+
+    private bool CaptureBatchNativeMarketPrice(uint expectedItemId)
+    {
+        var exclusions = config.PentameldPricingOwnRetainers
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var capture = nativeMarketPricing.Capture(
+            config.PentameldPricingWatchList,
+            exclusions,
+            config.PentameldPricingUndercutGil);
+        if (capture.Results.Count == 0 || capture.Results.Any(x => x.ItemId != expectedItemId))
+        {
+            pricingStatus = $"Native batch capture rejected item {expectedItemId}: {capture.Status}";
+            return false;
+        }
+        RecordNativeMarketCapture(capture);
+        pricingStatus = "NATIVE BATCH: " + capture.Status;
+        return true;
+    }
+
+    private void CaptureRetainerForNativeAudit(RetainerListingCapture capture)
+    {
+        retainerCapture = capture;
+        RecordListingAuditCapture(capture);
+        pricingStatus = $"NATIVE BATCH: {capture.Status}";
     }
 
     private void RecordNativeMarketCapture(NativeMarketPricingCapture capture)
